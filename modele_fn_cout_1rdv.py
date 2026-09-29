@@ -54,7 +54,8 @@ MODÈLE DE RESSOURCES (après suppression de la SSPI)
 from __future__ import annotations
 
 import statistics
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right, insort
+from math import sqrt
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -203,8 +204,19 @@ class Patient:
                        de 30 min : un canal carpien est prévisible, une
                        ostéosynthèse ne l'est pas, elles ne méritent pas la
                        même réserve.
-    `duree_sejour`     en jours, convention du fichier source : 1 = ambulatoire.
-                       Le nombre de NUITS vaut donc duree_sejour - 1.
+    `duree_sejour`     nombre de NUITS + 1 (1 = ambulatoire). Les nuits se
+                       calculent avec les DATES : Date Sortie − Date Entrée.
+                       Ne JAMAIS utiliser la colonne « durée de séjour » du
+                       fichier : 1 884 séjours y sont codés 1 alors que le
+                       patient a passé une ou plusieurs nuits.
+    `nuits_avant`      nuits passées AVANT le jour opératoire (entrée la
+                       veille ou plus tôt) = Date Inter − Date Entrée. Elles
+                       font partie de `nb_nuits` : le lit est occupé de
+                       J − nuits_avant à J − nuits_avant + nb_nuits − 1.
+    `ambulatoire`      DÉDUIT de `duree_sejour` (ambulatoire ⇔ 0 nuit). On
+                       peut le passer, mais s'il contredit `duree_sejour` la
+                       création du patient échoue (ValueError) : sinon un
+                       patient pouvait n'occuper ni lit ni place.
     `med_id`           CONTRAINTE DURE : un patient ne change jamais de
                        chirurgien. C'est pour cela que le voisinage du tabou
                        n'explore que les vacations de son propre praticien.
@@ -222,6 +234,9 @@ class Patient:
                        la durée estimée — une décision clinique (bilan,
                        consultation d'anesthésie, délai de réflexion), jamais
                        quelque chose qu'on déduit de l'historique.
+                       Borne SUPÉRIEURE : `Instance.delai_max_programme`
+                       (6 mois après la consultation, règle du prof), ou
+                       `delai_max` si le patient en a un.
     `priorite`         réservé (pondération d'un patient prioritaire).
     """
 
@@ -229,7 +244,7 @@ class Patient:
     med_id: int
     duree_op: int = 60
     duree_sejour: int = 1
-    ambulatoire: bool = True
+    ambulatoire: bool | None = None    # déduit de duree_sejour (cf. __post_init__)
     marge_perso: int = 10
     jour_demande: int = 0
     fenetre_jours: int = 7     # délai MINIMUM ; 7 jours = le plus court des trois
@@ -256,6 +271,21 @@ class Patient:
     urgence: str = PROGRAMME
     delai_max: int | None = None
 
+    nuits_avant: int = 0
+
+    def __post_init__(self) -> None:
+        if self.duree_sejour < 1:
+            raise ValueError(f"patient {self.id} : duree_sejour = nuits + 1 >= 1")
+        ambu = self.duree_sejour == 1
+        if self.ambulatoire is None:
+            self.ambulatoire = ambu
+        elif bool(self.ambulatoire) != ambu:
+            raise ValueError(f"patient {self.id} : ambulatoire={self.ambulatoire} "
+                             f"mais {self.duree_sejour - 1} nuit(s) — ambulatoire ⇔ 0 nuit")
+        if not 0 <= self.nuits_avant <= self.duree_sejour - 1:
+            raise ValueError(f"patient {self.id} : nuits_avant={self.nuits_avant} "
+                             f"hors de [0, {self.duree_sejour - 1}]")
+
     @property
     def est_urgent(self) -> bool:
         return self.urgence != PROGRAMME
@@ -267,7 +297,9 @@ class Patient:
 
     @property
     def jour_max(self) -> int | None:
-        """Dernier jour autorisé (urgents), None si pas de borne."""
+        """Dernier jour autorisé si le patient a son propre `delai_max`,
+        None sinon. La borne effective, valable pour TOUS les patients, est
+        `Instance.jour_max(pid)`."""
         return None if self.delai_max is None else self.jour_demande + self.delai_max
 
     @property
@@ -394,7 +426,38 @@ class Instance:
     tis_meme_acte: int = 10          # TIS réduit si acte identique consécutif
     fermeture_uca: int = 20 * 60     # sortie ambulatoire au plus tard (minutes)
     surveillance_ambu: int = 180     # temps de surveillance d'un ambulatoire
-    heure_sortie_hospit: int = 10 * 60   # heure de libération d'un lit
+    heure_sortie_hospit: int = 10 * 60   # (inutilisé pour l'instant)
+    ouverture_uca: int = 7 * 60 + 30     # arrivée ambulatoire au plus tôt
+    avance_ambu: int = 120               # un ambulatoire arrive 2 h avant d'entrer en salle
+
+    # --- délais -----------------------------------------------------------
+    # Règle : opérer entre `fenetre_jours` et 6 mois APRÈS LA CONSULTATION.
+    # La borne haute est propre à chaque patient (jour_demande + 182), pas
+    # la fin de l'horizon.
+    delai_max_programme: int = 182
+
+    # --- marges de risque ----------------------------------------------------
+    # Comment les marges individuelles (P90 − médiane) s'additionnent :
+    #   "somme"       : Σ marges — tous les actes dérapent en même temps.
+    #                   Prudent, garantit zéro dépassement (défaut).
+    #   "quadratique" : √(Σ marges²) — P90 de la somme si les dérapages sont
+    #                   indépendants et à peu près gaussiens. Remplit plus.
+    cumul_marges: str = "somme"
+
+    # --- cibles et capacités par nuit / par jour (optionnelles) ----------------
+    # Sans cible, les coûts mesurent la VARIANCE, sur les seuls jours ouvrés
+    # (nuit qui suit un jour de bloc) : on ne pousse plus à remplir les
+    # week-ends et les jours fériés. Avec une cible (liste de longueur
+    # nb_jours), on mesure l'écart quadratique à la cible, sur tous les jours
+    # de la fenêtre — y compris un week-end, avec la cible qu'on lui donne.
+    # En simulation EN LIGNE, donner cible − charge future attendue : les
+    # jours lointains, pas encore remplis par les patients à venir, cessent
+    # alors d'attirer les patients.
+    cible_lits: list[float] | None = None
+    cible_places: list[float] | None = None
+    # Capacité de lits par nuit (ex. moins de lits le week-end), sinon
+    # `capacite_lits` tous les jours. Contrainte DURE.
+    capacite_lits_nuit: list[int] | None = None
 
     # --- réserves pour les urgences ---------------------------------------
     # Le PROGRAMMÉ n'a droit qu'à :
@@ -471,6 +534,24 @@ class Instance:
             return 0
         return v.tvo - round(self.tampon_urgence * v.tvo)
 
+    def cap_lits(self, j: int) -> int:
+        """Capacité de lits de la nuit j."""
+        return self.capacite_lits if self.capacite_lits_nuit is None else self.capacite_lits_nuit[j]
+
+    def jour_max(self, patient_id: int) -> int:
+        """Dernier jour où le patient peut être opéré : son `delai_max` s'il
+        en a un, sinon 6 mois (`delai_max_programme`) après la consultation."""
+        p = self.patients[patient_id]
+        d = self.delai_max_programme if p.delai_max is None else p.delai_max
+        return p.jour_demande + d
+
+    def nuits_occupees(self, patient_id: int, jour: int) -> range:
+        """Nuits où le patient opéré le jour `jour` occupe un lit (vide pour
+        un ambulatoire), tronquées à l'horizon."""
+        p = self.patients[patient_id]
+        debut = jour - p.nuits_avant
+        return range(max(0, debut), min(debut + p.nb_nuits, self.nb_jours))
+
     def jour_ouvre_suivant(self, j: int) -> int | None:
         """Premier jour > j où le bloc a des vacations (None si aucun)."""
         k = bisect_left(self.jours_ouvres, j + 1)
@@ -501,23 +582,20 @@ class Instance:
                             fenetre: int | None = None) -> list[int]:
         """Vacations où le patient PEUT aller.
 
-        Trois filtres, tous DURS :
+        Filtres, tous DURS :
           - le chirurgien ne change jamais (votre règle) ;
-          - on n'opère pas quelqu'un avant sa consultation ;
-          - on n'opère pas avant le DÉLAI MINIMUM fixé par le praticien.
-
-        LA FENÊTRE EST UNE BORNE INFÉRIEURE — « pas avant trois semaines » —
-        et non un intervalle. Au-delà, la recherche va jusqu'au bout de
-        l'horizon. C'est ce qui garantit qu'un patient ressort toujours de
-        consultation avec une date, sauf si l'horizon entier est saturé.
+          - on n'opère pas avant le DÉLAI MINIMUM fixé par le praticien ;
+          - on n'opère pas plus de 6 mois après la consultation
+            (`jour_max`), quelle que soit la fin de l'horizon.
 
         `fenetre` permet de forcer un autre délai minimum, ce qui ne sert
         qu'aux analyses de sensibilité.
         """
         p = self.patients[patient_id]
         jmin = p.jour_demande + (p.fenetre_jours if fenetre is None else fenetre)
+        jmax = self.jour_max(patient_id)
         return [vid for vid in self.vacations_du_medecin.get(p.med_id, ())
-                if self.vacations[vid].jour >= jmin]
+                if jmin <= self.vacations[vid].jour <= jmax]
 
 
 # ---------------------------------------------------------------------------
@@ -528,124 +606,218 @@ class Instance:
 class Solution:
     """Affectation patient -> vacation, avec ÉVALUATION INCRÉMENTALE.
 
-    Le cœur de la performance d'un tabou est là. À chaque itération on évalue
-    des centaines de mouvements ; recalculer la fonction objectif à chaque fois
-    coûterait O(nb_patients). On maintient donc en permanence :
+    Une métaheuristique évalue des centaines de milliers de mouvements ;
+    recalculer le coût à chaque fois coûterait O(patients + jours). On
+    maintient donc en permanence, à chaque `affecter` :
 
-      nb[v], somme_durees[v], somme_marges[v]  -> la charge de chaque vacation
-      places_jour[j], lits_jour[j]             -> les profils journaliers
-      s_places, s_places2, s_lits, s_lits2     -> sommes et sommes de carrés,
-                                                  d'où la variance en O(1)
+      nb, somme_durees, somme_marges(2)[v]   -> charge de chaque vacation
+      places_jour, lits_jour[j]              -> profils journaliers
+      *_urg*                                 -> part des URGENTS (réserves)
+      s_places, s_places2, s_lits, s_lits2   -> Σx, Σx² des écarts à la cible
+                                                sur les jours MESURÉS
+      s_creux_u, s_tvo_u                     -> temps perdu / TVO des
+                                                vacations UTILISÉES (fenêtre)
+      s_exces_places, s_exces_lits, s_dep    -> violations des contraintes dures
+      s_delai, n_places                      -> délai des patients placés
+      s_taux, s_taux2                        -> variance du remplissage par
+                                                praticien (indicateur)
 
-    Un déplacement ne touche qu'une poignée de ces compteurs, et
-    `delta_deplacement` renvoie la variation exacte de l'objectif SANS rien
-    modifier. On applique seulement le mouvement retenu.
+    Toutes les fonctions coût de la section 6 sont donc en O(1).
+    `controle_coherence()` recalcule tout de zéro et compare (tests).
 
-    Rappel de la formule de variance utilisée :
-        Var(X) = E[X²] - E[X]²  =  s2/n - (s/n)²
-    Numériquement imprudente en général, parfaitement sûre ici : les valeurs
-    sont de petits entiers positifs.
+    PATIENTS SANS VACATION. Deux états :
+      `sans_date`    : pas encore vu en consultation (ou retiré le temps d'un
+                       mouvement par une métaheuristique) ;
+      `hors_horizon` : vu, mais aucune date ne tenait.
+    Un patient À PLANIFIER (jour_demande <= jour_courant) sans vacation est
+    pénalisé dans le coût, quel que soit son état : déplanifier n'est jamais
+    gratuit. `jour_courant=None` (défaut) = tous les patients de l'instance
+    sont à planifier (cas hors ligne : un lot de patients connus).
     """
 
     __slots__ = ("inst", "affectation", "nb", "somme_durees", "somme_marges",
-                 "places_jour", "lits_jour", "s_places", "s_places2",
-                 "s_lits", "s_lits2", "sans_date", "hors_horizon",
-                 "s_taux", "s_taux2", "_jours_places", "_n_jours_lits",
-                 "nb_urg", "somme_urg", "places_urg_jour", "lits_urg_jour")
+                 "somme_marges2", "places_jour", "lits_jour",
+                 "nb_urg", "urg_durees", "urg_marges", "urg_marges2",
+                 "places_urg_jour", "lits_urg_jour",
+                 "s_places", "s_places2", "s_lits", "s_lits2",
+                 "s_creux_u", "s_tvo_u", "s_exces_places", "s_exces_lits", "s_dep",
+                 "s_delai", "n_places", "sans_date", "hors_horizon",
+                 "s_taux", "s_taux2", "jour_courant", "_jd",
+                 "t0", "t1", "_mes_places", "_mes_lits", "_n_mes_places", "_n_mes_lits",
+                 "_jours_places", "_n_jours_lits")
 
-    def __init__(self, inst: Instance):
+    def __init__(self, inst: Instance, jour_courant: int | None = None):
         self.inst = inst
         self.affectation: dict[int, int | None] = {pid: None for pid in inst.patients}
-
-        self.nb: dict[int, int] = {vid: 0 for vid in inst.vacations}
-        self.somme_durees: dict[int, int] = {vid: 0 for vid in inst.vacations}
-        self.somme_marges: dict[int, int] = {vid: 0 for vid in inst.vacations}
-
-        self.places_jour: list[int] = [0] * inst.nb_jours
-        self.lits_jour: list[int] = [0] * inst.nb_jours
-
-        self.s_places = self.s_places2 = 0
-        self.s_lits = self.s_lits2 = 0
-
-        # Part des URGENTS dans chaque compteur (programmé = total − urgents)
-        self.nb_urg: dict[int, int] = {vid: 0 for vid in inst.vacations}
-        self.somme_urg: dict[int, int] = {vid: 0 for vid in inst.vacations}
-        self.places_urg_jour: list[int] = [0] * inst.nb_jours
-        self.lits_urg_jour: list[int] = [0] * inst.nb_jours
-
-        # Agrégats du REMPLISSAGE par médecin : somme et somme des carrés des
-        # taux de remplissage de SES vacations, d'où leur variance en O(1).
-        # Les vacations vides comptent, avec un taux de 0 — c'est ce qui fait
-        # que laisser une journée à l'abandon pendant qu'une autre sature est
-        # pénalisé. C'est le sens de « lisser entre les vacations du médecin ».
-        self.s_taux: dict[int, float] = {m: 0.0 for m in inst.vacations_du_medecin}
-        self.s_taux2: dict[int, float] = {m: 0.0 for m in inst.vacations_du_medecin}
-
-        # IL N'Y A PAS DE LISTE D'ATTENTE dans ce modèle. Deux états
-        # seulement pour un patient sans vacation :
-        #   `sans_date`    : il n'est pas encore passé en consultation, il
-        #                    n'existe donc pas encore pour le planning ;
-        #   `hors_horizon` : il est passé en consultation mais aucune date ne
-        #                    tenait dans les 6 mois — il sera reconvoqué quand
-        #                    l'horizon aura glissé.
-        # Le tabou hors-ligne utilise aussi `sans_date` comme état TRANSITOIRE
-        # pendant sa recherche ; comme le nombre de patients sans date est
-        # comparé AVANT le coût, il n'y reste que ceux qu'aucune vacation de
-        # leur fenêtre ne peut accueillir.
+        V = inst.vacations
+        self.nb = {vid: 0 for vid in V}
+        self.somme_durees = {vid: 0 for vid in V}
+        self.somme_marges = {vid: 0 for vid in V}
+        self.somme_marges2 = {vid: 0 for vid in V}
+        self.nb_urg = {vid: 0 for vid in V}
+        self.urg_durees = {vid: 0 for vid in V}
+        self.urg_marges = {vid: 0 for vid in V}
+        self.urg_marges2 = {vid: 0 for vid in V}
+        self.places_jour = [0] * inst.nb_jours
+        self.lits_jour = [0] * inst.nb_jours
+        self.places_urg_jour = [0] * inst.nb_jours
+        self.lits_urg_jour = [0] * inst.nb_jours
+        self.s_taux = {m: 0.0 for m in inst.vacations_du_medecin}
+        self.s_taux2 = {m: 0.0 for m in inst.vacations_du_medecin}
+        self.s_delai = 0.0
+        self.n_places = 0
         self.sans_date: set[int] = set(inst.patients)
         self.hors_horizon: set[int] = set()
-
-        # dénominateurs des variances, fixés une fois pour toutes
+        self.jour_courant = jour_courant
+        self._jd = sorted(p.jour_demande for p in inst.patients.values())
         self._jours_places = inst.jours_ouvres or list(range(inst.nb_jours))
         self._n_jours_lits = inst.nb_jours
+        self.definir_fenetre(0, inst.nb_jours - 1)
 
-    # -- copie -------------------------------------------------------------
+    # -- fenêtre de mesure ---------------------------------------------------
+
+    def definir_fenetre(self, t0: int, t1: int) -> None:
+        """Jours [t0, t1] sur lesquels on MESURE lissage et remplissage (les
+        contraintes dures, elles, valent sur tout l'horizon). Recalcule les
+        agrégats : O(jours + vacations), à n'appeler qu'au changement de
+        fenêtre (ex. chaque jour d'une simulation en ligne)."""
+        inst = self.inst
+        self.t0, self.t1 = t0, t1
+        ouvres = set(inst.jours_ouvres)
+        dans = [t0 <= j <= t1 for j in range(inst.nb_jours)]
+        self._mes_places = [dans[j] and (inst.cible_places is not None or j in ouvres)
+                            for j in range(inst.nb_jours)]
+        self._mes_lits = [dans[j] and (inst.cible_lits is not None or j in ouvres)
+                          for j in range(inst.nb_jours)]
+        self._n_mes_places = sum(self._mes_places)
+        self._n_mes_lits = sum(self._mes_lits)
+        self._recalculer()
+
+    def _recalculer(self) -> None:
+        inst = self.inst
+        self.s_places = self.s_places2 = 0.0
+        self.s_lits = self.s_lits2 = 0.0
+        self.s_exces_places = self.s_exces_lits = 0
+        for j in range(inst.nb_jours):
+            if self._mes_places[j]:
+                x = self._x_places(j)
+                self.s_places += x
+                self.s_places2 += x * x
+            if self._mes_lits[j]:
+                x = self._x_lits(j)
+                self.s_lits += x
+                self.s_lits2 += x * x
+            self.s_exces_places += self._exces_places(j)
+            self.s_exces_lits += self._exces_lits(j)
+        self.s_creux_u = self.s_tvo_u = self.s_dep = 0
+        for vid in inst.vacations:
+            dep, cr, tv = self._contrib_vac(vid)
+            self.s_dep += dep
+            self.s_creux_u += cr
+            self.s_tvo_u += tv
+
+    # -- contributions élémentaires -------------------------------------------
+
+    def _x_places(self, j: int) -> float:
+        c = self.inst.cible_places
+        return self.places_jour[j] - (c[j] if c is not None else 0.0)
+
+    def _x_lits(self, j: int) -> float:
+        c = self.inst.cible_lits
+        return self.lits_jour[j] - (c[j] if c is not None else 0.0)
+
+    def _exces_places(self, j: int) -> int:
+        """UNE pénalité par jour : le pire des deux excès (capacité totale,
+        ou capacité du programmé hors réserve)."""
+        inst = self.inst
+        n = self.places_jour[j]
+        cap = inst.capacite_places_jour
+        return max(0, n - cap, n - self.places_urg_jour[j] - (cap - inst.reserve_places))
+
+    def _exces_lits(self, j: int) -> int:
+        inst = self.inst
+        n = self.lits_jour[j]
+        cap = inst.cap_lits(j)
+        return max(0, n - cap, n - self.lits_urg_jour[j] - (cap - inst.reserve_lits))
+
+    def _contrib_vac(self, vid: int) -> tuple[int, int, int]:
+        """(violation en minutes, creux si utilisée et dans la fenêtre, TVO
+        programmable si utilisée et dans la fenêtre)."""
+        v = self.inst.vacations[vid]
+        dep = self.depassement(vid)
+        if v.urgence:
+            return dep, 0, 0
+        dep = max(dep, self.depassement_programme(vid))
+        if self.nb[vid] == 0 or not (self.t0 <= v.jour <= self.t1):
+            return dep, 0, 0
+        cap = self.inst.capacite_programme(vid)
+        return dep, max(0, cap - self.charge(vid)), cap
+
+    def _bouger_jour(self, j: int, d: int, urgent: bool, lits: bool) -> None:
+        """Ajoute d (±1) patient présent le jour/la nuit j, en tenant les
+        agrégats à jour par différence avant/après."""
+        if lits:
+            mes, xf, ef = self._mes_lits[j], self._x_lits, self._exces_lits
+        else:
+            mes, xf, ef = self._mes_places[j], self._x_places, self._exces_places
+        x0, e0 = (xf(j) if mes else 0.0), ef(j)
+        if lits:
+            self.lits_jour[j] += d
+            if urgent:
+                self.lits_urg_jour[j] += d
+        else:
+            self.places_jour[j] += d
+            if urgent:
+                self.places_urg_jour[j] += d
+        x1, e1 = (xf(j) if mes else 0.0), ef(j)
+        if lits:
+            self.s_lits += x1 - x0
+            self.s_lits2 += x1 * x1 - x0 * x0
+            self.s_exces_lits += e1 - e0
+        else:
+            self.s_places += x1 - x0
+            self.s_places2 += x1 * x1 - x0 * x0
+            self.s_exces_places += e1 - e0
+
+    # -- copie ---------------------------------------------------------------
 
     def copie(self) -> "Solution":
-        """Copie de travail. Rapide : que des dict/list de petits entiers."""
+        """Copie de travail. Rapide : que des dict/list de petits nombres."""
         s = Solution.__new__(Solution)
+        for a in Solution.__slots__:
+            val = getattr(self, a)
+            if isinstance(val, (dict, list, set)):
+                val = type(val)(val)
+            setattr(s, a, val)
         s.inst = self.inst
-        s.affectation = dict(self.affectation)
-        s.nb = dict(self.nb)
-        s.somme_durees = dict(self.somme_durees)
-        s.somme_marges = dict(self.somme_marges)
-        s.places_jour = list(self.places_jour)
-        s.lits_jour = list(self.lits_jour)
-        s.s_places, s.s_places2 = self.s_places, self.s_places2
-        s.s_lits, s.s_lits2 = self.s_lits, self.s_lits2
-        s.sans_date = set(self.sans_date)
-        s.hors_horizon = set(self.hors_horizon)
-        s.s_taux = dict(self.s_taux)
-        s.s_taux2 = dict(self.s_taux2)
+        s._mes_places, s._mes_lits = self._mes_places, self._mes_lits   # lecture seule
         s._jours_places = self._jours_places
-        s._n_jours_lits = self._n_jours_lits
-        s.nb_urg = dict(self.nb_urg)
-        s.somme_urg = dict(self.somme_urg)
-        s.places_urg_jour = list(self.places_urg_jour)
-        s.lits_urg_jour = list(self.lits_urg_jour)
         return s
 
     # -- lecture -----------------------------------------------------------
 
-    def charge(self, vid: int) -> int:
-        """Minutes engagées dans la vacation : TROS + TIS + marges de risque.
+    def _marge_cumulee(self, s1: int, s2: int) -> float:
+        return sqrt(s2) if self.inst.cumul_marges == "quadratique" else s1
 
-        C'est ici qu'on paie la marge : la vacation doit tenir même si tous
-        les actes dérapent jusqu'à leur P90. Un `tis * (n-1)` classique, plus
-        la somme des marges individuelles.
-        """
+    def charge(self, vid: int) -> int:
+        """Minutes engagées dans la vacation : TROS + TIS + marge de risque
+        cumulée (cf. `Instance.cumul_marges`). Le TIS est compté plein : la
+        vacation tient donc dans N'IMPORTE QUEL ordre de passage."""
         n = self.nb[vid]
         if n == 0:
             return 0
-        return self.somme_durees[vid] + self.somme_marges[vid] + self.inst.tis * (n - 1)
+        m = self._marge_cumulee(self.somme_marges[vid], self.somme_marges2[vid])
+        return int(round(self.somme_durees[vid] + m)) + self.inst.tis * (n - 1)
 
     def charge_programme(self, vid: int) -> int:
         """Charge des seuls patients PROGRAMMÉS de la vacation."""
         n = self.nb[vid] - self.nb_urg[vid]
         if n <= 0:
             return 0
-        return (self.somme_durees[vid] + self.somme_marges[vid]
-                - self.somme_urg[vid] + self.inst.tis * (n - 1))
+        m = self._marge_cumulee(self.somme_marges[vid] - self.urg_marges[vid],
+                                self.somme_marges2[vid] - self.urg_marges2[vid])
+        return (int(round(self.somme_durees[vid] - self.urg_durees[vid] + m))
+                + self.inst.tis * (n - 1))
 
     def depassement_programme(self, vid: int) -> int:
         """Débordement du programmé dans le tampon réservé aux urgences."""
@@ -658,9 +830,8 @@ class Solution:
         return max(0, self.charge(vid) - self.inst.capacite_utile(vid))
 
     def taux_remplissage(self, vid: int) -> float:
-        """Charge / capacité du PROGRAMMÉ (TVO − tampon). Une vacation pleine
-        hors tampon vaut 1 ; une urgence posée dans le tampon la fait passer
-        au-delà. Sans tampon : charge / TVO, comme avant."""
+        """Charge / capacité du PROGRAMMÉ (TVO − tampon). Sans tampon :
+        charge / TVO."""
         cap = self.inst.capacite_programme(vid) or self.inst.vacations[vid].tvo
         return self.charge(vid) / cap if cap else 0.0
 
@@ -671,6 +842,16 @@ class Solution:
         vids = set(self.inst.vacations_du_jour.get(j, ()))
         return [pid for pid, v in self.affectation.items() if v in vids]
 
+    def n_a_planifier(self) -> int:
+        """Patients déjà vus en consultation (jour_demande <= jour_courant)."""
+        if self.jour_courant is None:
+            return len(self._jd)
+        return bisect_right(self._jd, self.jour_courant)
+
+    def nb_non_places(self) -> int:
+        """Patients à planifier qui n'ont pas de vacation."""
+        return max(0, self.n_a_planifier() - self.n_places)
+
     # -- modification ------------------------------------------------------
 
     def _appliquer_patient(self, pid: int, vid: int | None, signe: int) -> None:
@@ -680,63 +861,60 @@ class Solution:
         inst = self.inst
         p = inst.patients[pid]
         v = inst.vacations[vid]
+        urgent = p.urgence != PROGRAMME
+        m = p.marge_perso
 
         self.nb[vid] += signe
         self.somme_durees[vid] += signe * p.duree_op
-        self.somme_marges[vid] += signe * p.marge_perso
-
-        if p.urgence != PROGRAMME:
+        self.somme_marges[vid] += signe * m
+        self.somme_marges2[vid] += signe * m * m
+        if urgent:
             self.nb_urg[vid] += signe
-            self.somme_urg[vid] += signe * (p.duree_op + p.marge_perso)
-            if p.ambulatoire:
-                self.places_urg_jour[v.jour] += signe
-            else:
-                for j in range(v.jour, min(v.jour + p.nb_nuits, inst.nb_jours)):
-                    self.lits_urg_jour[j] += signe
+            self.urg_durees[vid] += signe * p.duree_op
+            self.urg_marges[vid] += signe * m
+            self.urg_marges2[vid] += signe * m * m
+        self.s_delai += signe * p.priorite * (v.jour - p.jour_demande)
+        self.n_places += signe
 
         if p.ambulatoire:
-            j = v.jour
-            a = self.places_jour[j]
-            b = a + signe
-            self.places_jour[j] = b
-            self.s_places += b - a
-            self.s_places2 += b * b - a * a
+            self._bouger_jour(v.jour, signe, urgent, lits=False)
         else:
-            # les nuits occupées : J, J+1, ... J+nb_nuits-1
-            for j in range(v.jour, min(v.jour + p.nb_nuits, inst.nb_jours)):
-                a = self.lits_jour[j]
-                b = a + signe
-                self.lits_jour[j] = b
-                self.s_lits += b - a
-                self.s_lits2 += b * b - a * a
-
-
+            for j in inst.nuits_occupees(pid, v.jour):
+                self._bouger_jour(j, signe, urgent, lits=True)
 
     def affecter(self, pid: int, vid: int | None) -> None:
         """Pose un patient dans une vacation. `None` = le retire du planning.
 
         Retirer un patient n'est PAS une opération du processus réel : une
-        date annoncée ne bouge plus. C'est un mouvement interne au tabou
-        hors-ligne, et l'outil de replanification exceptionnelle (congé d'un
-        praticien, fermeture de salle) s'en sert aussi.
+        date annoncée ne bouge plus. C'est un mouvement interne aux
+        métaheuristiques hors ligne (et à la replanification exceptionnelle).
         """
         ancien = self.affectation[pid]
         if ancien == vid:
             return
-        med = self.inst.patients[pid].med_id
+        inst = self.inst
+        med = inst.patients[pid].med_id
+        touchees = [v for v in (ancien, vid) if v is not None]
 
-        # Les agrégats de remplissage se mettent à jour par différence : on
-        # note le taux des deux vacations concernées avant, puis après. Comme
-        # le patient ne change jamais de chirurgien, les deux vacations
-        # appartiennent au même praticien et un seul médecin est touché.
-        avant = [(v, self.taux_remplissage(v)) for v in (ancien, vid)
-                 if v is not None and not self.inst.vacations[v].urgence]
+        # par différence : contributions des vacations touchées avant/après
+        avant_taux = [(v, self.taux_remplissage(v)) for v in touchees
+                      if not inst.vacations[v].urgence]
+        for v in touchees:
+            dep, cr, tv = self._contrib_vac(v)
+            self.s_dep -= dep
+            self.s_creux_u -= cr
+            self.s_tvo_u -= tv
 
         self._appliquer_patient(pid, ancien, -1)
         self._appliquer_patient(pid, vid, +1)
         self.affectation[pid] = vid
 
-        for v, t0 in avant:
+        for v in touchees:
+            dep, cr, tv = self._contrib_vac(v)
+            self.s_dep += dep
+            self.s_creux_u += cr
+            self.s_tvo_u += tv
+        for v, t0 in avant_taux:
             t1 = self.taux_remplissage(v)
             self.s_taux[med] += t1 - t0
             self.s_taux2[med] += t1 * t1 - t0 * t0
@@ -750,46 +928,40 @@ class Solution:
     def viole(self, pid: int, vid: int) -> bool:
         """Le patient étant POSÉ en vid, une contrainte dure est-elle violée ?
 
-        Pour tous : dépassement du TVO, lits > capacité, admissions
-        ambulatoires > capacité. En plus, pour un PROGRAMMÉ : créneau
-        URGENCES interdit, tampon interdit, réserves de lits et de places
-        interdites.
+        Pour tous : jour hors de [jour_min, jour_max], dépassement du TVO,
+        lits > capacité de la nuit, admissions ambulatoires > capacité.
+        En plus pour un PROGRAMMÉ : créneau URGENCES, tampon et réserves de
+        lits et de places interdits.
         """
-        if self.depassement(vid) > 0:
-            return True
         inst, p = self.inst, self.inst.patients[pid]
         v = inst.vacations[vid]
+        if not p.jour_min <= v.jour <= inst.jour_max(pid):
+            return True
+        if self.depassement(vid) > 0:
+            return True
         urgent = p.urgence != PROGRAMME
         if not urgent and (v.urgence or self.depassement_programme(vid) > 0):
             return True
         if p.ambulatoire:
             j = v.jour
-            if self.places_jour[j] > inst.capacite_places_jour:
-                return True
-            return (not urgent and self.places_jour[j] - self.places_urg_jour[j]
-                    > inst.capacite_places_jour - inst.reserve_places)
-        cap, cap_prog = inst.capacite_lits, inst.capacite_lits - inst.reserve_lits
-        for k in range(v.jour, min(v.jour + p.nb_nuits, inst.nb_jours)):
-            if self.lits_jour[k] > cap:
-                return True
-            if not urgent and self.lits_jour[k] - self.lits_urg_jour[k] > cap_prog:
+            cap = inst.capacite_places_jour
+            n = self.places_jour[j]
+            return n > cap or (not urgent and n - self.places_urg_jour[j]
+                               > cap - inst.reserve_places)
+        for k in inst.nuits_occupees(pid, v.jour):
+            cap = inst.cap_lits(k)
+            n = self.lits_jour[k]
+            if n > cap or (not urgent and n - self.lits_urg_jour[k] > cap - inst.reserve_lits):
                 return True
         return False
 
+    # -- indicateurs de dispersion (O(1)) -------------------------------------
+
     def variance_remplissage_medecin(self, med_id: int) -> float:
-        """Variance des taux de remplissage des vacations de ce praticien.
-
-        0 = toutes ses journées sont remplies pareil. C'est le critère
-        « % de remplissage associé au médecin », écrit comme un coût à
-        minimiser : on ne cherche pas à remplir au maximum, on cherche à ce
-        que ses journées se ressemblent.
-
-        Conséquence pratique, et c'est elle qu'il faut retenir : un patient
-        ira spontanément dans la vacation la MOINS remplie du praticien, dans
-        la fenêtre choisie. On évite ainsi les journées à 95 % — celles qui
-        débordent au moindre aléa — et les journées à 30 % — celles qui
-        mobilisent une équipe pour rien.
-        """
+        """Variance des taux de remplissage des vacations de ce praticien
+        (vides comprises, taux 0). INDICATEUR de régularité : elle ne mesure
+        PAS le remplissage du bloc (tout à 40 % donne 0). Le coût utilise
+        `part_creux_utilisees`."""
         n = self.inst.nb_vacations_medecin.get(med_id, 0)
         if n == 0:
             return 0.0
@@ -797,47 +969,51 @@ class Solution:
         return max(0.0, s2 / n - (s / n) ** 2)
 
     def variance_remplissage(self) -> float:
-        """Moyenne du précédent sur tous les praticiens de la grille.
-
-        On divise par le nombre TOTAL de praticiens, pas par le nombre de
-        praticiens actifs : sinon le dénominateur bougerait pendant la
-        recherche et deux itérations ne seraient plus comparables.
-        """
         n = max(1, len(self.inst.vacations_du_medecin))
         return sum(self.variance_remplissage_medecin(m)
                    for m in self.inst.vacations_du_medecin) / n
 
-    # -- indicateurs agrégés ----------------------------------------------
+    def _dispersion(self, s: float, s2: float, n: int, cible: bool) -> float:
+        if n == 0:
+            return 0.0
+        if cible:                       # écart quadratique moyen à la cible
+            return s2 / n
+        return max(0.0, s2 / n - (s / n) ** 2)   # variance
 
     def variance_places(self) -> float:
-        # Seuls les jours ouvrés comptent au dénominateur : une place
-        # ambulatoire ne peut pas être utilisée un jour sans vacation, ce
-        # n'est pas un « creux » qu'on pourrait combler. Les jours non ouvrés
-        # valent 0 et ne contribuent donc ni à s_places ni à s_places2 : les
-        # sommes maintenues incrémentalement sont directement utilisables.
-        n = len(self._jours_places)
-        if n == 0:
-            return 0.0
-        return max(0.0, self.s_places2 / n - (self.s_places / n) ** 2)
+        """Admissions ambulatoires, sur les jours MESURÉS (fenêtre ∩ jours
+        ouvrés, ou toute la fenêtre si `cible_places`) : variance, ou écart
+        quadratique moyen à la cible si `Instance.cible_places`."""
+        return self._dispersion(self.s_places, self.s_places2, self._n_mes_places,
+                                self.inst.cible_places is not None)
 
     def variance_lits(self) -> float:
-        # tous les jours comptent, week-ends compris : un lit occupé le samedi
-        # est un lit occupé. C'est précisément ce qu'on veut lisser.
-        n = self._n_jours_lits
-        if n == 0:
-            return 0.0
-        return max(0.0, self.s_lits2 / n - (self.s_lits / n) ** 2)
+        """Lits occupés, sur les nuits MESURÉES : sans cible, seulement les
+        nuits qui suivent un jour de bloc (on ne pousse plus à remplir les
+        week-ends) ; avec `Instance.cible_lits`, écart quadratique moyen à la
+        cible sur toute la fenêtre."""
+        return self._dispersion(self.s_lits, self.s_lits2, self._n_mes_lits,
+                                self.inst.cible_lits is not None)
+
+    def part_creux_utilisees(self) -> float:
+        """Temps de bloc PERDU dans les vacations utilisées (au moins un
+        patient) de la fenêtre, rapporté à leur TVO programmable. Une
+        vacation vide n'est pas comptée : elle peut être rendue au bloc."""
+        return self.s_creux_u / self.s_tvo_u if self.s_tvo_u else 0.0
 
     def moyenne_places(self) -> float:
-        n = len(self._jours_places)
-        return self.s_places / n if n else 0.0
+        n = self._n_mes_places
+        return sum(self.places_jour[j] for j in range(self.inst.nb_jours)
+                   if self._mes_places[j]) / n if n else 0.0
 
     def moyenne_lits(self) -> float:
-        return self.s_lits / self._n_jours_lits if self._n_jours_lits else 0.0
+        n = self._n_mes_lits
+        return sum(self.lits_jour[j] for j in range(self.inst.nb_jours)
+                   if self._mes_lits[j]) / n if n else 0.0
 
     def creux_total(self) -> int:
-        """Creux des vacations PROGRAMMÉES (un créneau URGENCES vide n'est
-        pas du temps perdu : c'est une réserve)."""
+        """Creux des vacations PROGRAMMÉES, vides comprises (un créneau
+        URGENCES vide n'est pas du temps perdu : c'est une réserve)."""
         return sum(self.creux(vid) for vid, v in self.inst.vacations.items()
                    if not v.urgence)
 
@@ -848,28 +1024,42 @@ class Solution:
         return sum(v.tvo for v in self.inst.vacations.values() if not v.urgence)
 
     def surcharge_lits(self) -> int:
-        cap = self.inst.capacite_lits
-        return sum(max(0, n - cap) for n in self.lits_jour)
+        return sum(max(0, self.lits_jour[j] - self.inst.cap_lits(j))
+                   for j in range(self.inst.nb_jours))
 
     def surcharge_places(self) -> int:
         cap = self.inst.capacite_places_jour
         return sum(max(0, self.places_jour[j] - cap) for j in self._jours_places)
 
     def delai_total(self) -> float:
-        """Somme des délais consultation -> opération, pondérés par la priorité.
+        """Σ priorité × (jour opéré − jour de consultation), sur les patients
+        PLACÉS. Définition UNIQUE du délai (indicateurs ET coût). Les patients
+        non placés ne sont pas « comptés au dernier jour » : ils ont leur
+        propre pénalité (`nb_non_places`)."""
+        return self.s_delai
 
-        Un patient sans date compte comme s'il était opéré au dernier jour de
-        l'horizon : c'est une borne basse de ce qu'il coûtera réellement, et
-        surtout c'est monotone — sans cela, ne pas placer un patient
-        deviendrait gratuit et l'algorithme préférerait ne rien faire.
-        """
-        total = 0.0
-        inst = self.inst
+    def delai_moyen(self) -> float:
+        return self.s_delai / self.n_places if self.n_places else 0.0
+
+    # -- contrôle ------------------------------------------------------------
+
+    def controle_coherence(self) -> None:
+        """Recalcule tout de zéro et compare aux agrégats incrémentaux."""
+        ref = Solution(self.inst, self.jour_courant)
+        ref.definir_fenetre(self.t0, self.t1)
         for pid, vid in self.affectation.items():
-            p = inst.patients[pid]
-            jour = inst.vacations[vid].jour if vid is not None else inst.nb_jours
-            total += p.priorite * (jour - p.jour_demande)
-        return total
+            if vid is not None:
+                ref.affecter(pid, vid)
+        for a in ("nb", "somme_durees", "somme_marges", "somme_marges2", "nb_urg",
+                  "urg_durees", "urg_marges", "urg_marges2", "places_jour",
+                  "lits_jour", "places_urg_jour", "lits_urg_jour",
+                  "s_exces_places", "s_exces_lits", "s_dep", "s_creux_u",
+                  "s_tvo_u", "n_places"):
+            assert getattr(ref, a) == getattr(self, a), a
+        for a in ("s_places", "s_places2", "s_lits", "s_lits2", "s_delai"):
+            assert abs(getattr(ref, a) - getattr(self, a)) < 1e-6, a
+        for m in self.s_taux:
+            assert abs(ref.s_taux[m] - self.s_taux[m]) < 1e-6, ("s_taux", m)
 
     # -- audit de faisabilité ----------------------------------------------
 
@@ -885,47 +1075,42 @@ class Solution:
             if v.urgence and not p.est_urgent:
                 c.append(Conflit("U1", f"patient programmé {pid} dans le créneau "
                                        f"URGENCES {vid}", pid, vid))
-            if p.jour_max is not None and v.jour > p.jour_max:
-                c.append(Conflit("U2", f"urgence {pid} opérée J{v.jour} après son "
-                                       f"délai maximum J{p.jour_max}", pid, vid))
             if v.med_id != p.med_id and not (v.urgence and p.est_urgent):
                 c.append(Conflit("G1", f"patient {pid} chez le chirurgien {v.med_id} "
                                        f"au lieu de {p.med_id}", pid, vid))
-            if v.jour < p.jour_demande:
-                c.append(Conflit("G5", f"patient {pid} opéré J{v.jour} alors qu'il "
-                                       f"n'est inscrit que J{p.jour_demande}", pid, vid))
-        for vid in inst.vacations:
+            if v.jour < p.jour_min:
+                c.append(Conflit("G5", f"patient {pid} opéré J{v.jour} avant son délai "
+                                       f"minimum (J{p.jour_min})", pid, vid))
+            if v.jour > inst.jour_max(pid):
+                c.append(Conflit("G7", f"patient {pid} opéré J{v.jour} après son délai "
+                                       f"maximum (J{inst.jour_max(pid)})", pid, vid))
+        for vid, v in inst.vacations.items():
             d = self.depassement(vid)
             if d > 0:
                 c.append(Conflit("G2", f"vacation {vid} surchargée de {d} min "
                                        f"(marges de risque incluses)", None, vid))
-        for j, n in enumerate(self.lits_jour):
-            if n > inst.capacite_lits:
-                c.append(Conflit("G3", f"J{j} ({inst.date_du_jour(j)}) : "
-                                       f"{n} lits pour {inst.capacite_lits}"))
-        for j in self._jours_places:
-            n = self.places_jour[j]
-            if n > inst.capacite_places_jour:
-                c.append(Conflit("G4", f"J{j} ({inst.date_du_jour(j)}) : "
-                                       f"{n} admissions ambulatoires pour "
-                                       f"{inst.capacite_places_jour} possibles"))
-        for vid, v in inst.vacations.items():
             d = self.depassement_programme(vid)
             if d > 0 and not v.urgence:
                 c.append(Conflit("U3", f"vacation {vid} : le programmé déborde de "
                                        f"{d} min dans le tampon urgences", None, vid))
-        cap_l = inst.capacite_lits - inst.reserve_lits
-        cap_p = inst.capacite_places_jour - inst.reserve_places
         for j in range(inst.nb_jours):
+            n, cap = self.lits_jour[j], inst.cap_lits(j)
+            if n > cap:
+                c.append(Conflit("G3", f"J{j} ({inst.date_du_jour(j)}) : {n} lits pour {cap}"))
             n = self.lits_jour[j] - self.lits_urg_jour[j]
-            if n > cap_l:
+            if n > cap - inst.reserve_lits:
                 c.append(Conflit("U4", f"J{j} : le programmé occupe {n} lits "
-                                       f"pour {cap_l} hors réserve"))
+                                       f"pour {cap - inst.reserve_lits} hors réserve"))
+        cap = inst.capacite_places_jour
         for j in self._jours_places:
+            n = self.places_jour[j]
+            if n > cap:
+                c.append(Conflit("G4", f"J{j} ({inst.date_du_jour(j)}) : {n} admissions "
+                                       f"ambulatoires pour {cap} possibles"))
             n = self.places_jour[j] - self.places_urg_jour[j]
-            if n > cap_p:
+            if n > cap - inst.reserve_places:
                 c.append(Conflit("U5", f"J{j} : {n} ambulatoires programmés "
-                                       f"pour {cap_p} hors réserve"))
+                                       f"pour {cap - inst.reserve_places} hors réserve"))
         return c
 
     # -- URGENCES --------------------------------------------------------------
@@ -949,6 +1134,7 @@ class Solution:
         self.inst.ajouter_patient(p)
         self.affectation[p.id] = None
         self.sans_date.add(p.id)
+        insort(self._jd, p.jour_demande)
         return p.id
 
     def _essayer(self, pid: int, vid: int) -> bool:
@@ -996,8 +1182,7 @@ class Solution:
         return None
 
     def placer_semi_urgence(self, pid: int) -> int | None:
-        """SEMI-URGENCE : entre `jour_min` et `jour_max` (fin de l'horizon si
-        pas de `delai_max`), au plus tôt :
+        """SEMI-URGENCE : entre `jour_min` et `jour_max`, au plus tôt :
           1. vacations de SON chirurgien (capacité libre + tampon) ;
           2. créneaux URGENCES, en dernier recours (ils sont faits pour les
              urgences du jour même).
@@ -1008,10 +1193,8 @@ class Solution:
             raise ValueError(f"patient {pid} n'est pas une semi-urgence")
         if self.affectation[pid] is not None:
             raise ValueError(f"patient {pid} déjà placé")
-        jmax = inst.nb_jours - 1 if p.jour_max is None else min(p.jour_max, inst.nb_jours - 1)
-        for vid in inst.vacations_possibles(pid):     # triées par jour
-            if inst.vacations[vid].jour > jmax:
-                break
+        jmax = min(inst.jour_max(pid), inst.nb_jours - 1)
+        for vid in inst.vacations_possibles(pid):     # triées par jour, <= jour_max
             if self._essayer(pid, vid):
                 return vid
         for jour in range(p.jour_min, jmax + 1):
@@ -1024,36 +1207,40 @@ class Solution:
     # -- tableau de bord ---------------------------------------------------
 
     def indicateurs(self) -> dict:
+        inst = self.inst
         tvo = self.tvo_total()
-        prog = [vid for vid, v in self.inst.vacations.items() if not v.urgence]
+        prog = [vid for vid, v in inst.vacations.items() if not v.urgence]
         ouvertes = [vid for vid in prog if self.nb[vid] > 0]
-        taux = [self.taux_remplissage(vid) for vid in prog]
-        lits_ouvres = [self.lits_jour[j] for j in range(self.inst.nb_jours)]
-        places = [self.places_jour[j] for j in self._jours_places]
+        taux = [self.taux_remplissage(vid) for vid in ouvertes]
+        lits = [self.lits_jour[j] for j in range(inst.nb_jours) if self._mes_lits[j]]
+        places = [self.places_jour[j] for j in range(inst.nb_jours) if self._mes_places[j]]
         return {
-            "patients_programmes": len(self.inst.patients) - len(self.sans_date),
-            "patients_sans_date": len(self.sans_date),
+            "patients_programmes": self.n_places,          # = placés
+            "patients_sans_date": self.nb_non_places(),     # à planifier, sans vacation
             "patients_hors_horizon": len(self.hors_horizon),
-            "vacations_ouvertes": f"{len(ouvertes)}/{len(prog)}",
+            "vacations_ouvertes": f"{len(ouvertes)}/{len(prog)}",   # = utilisées
             "urgents_places": sum(1 for p, v in self.affectation.items()
-                                  if v is not None and self.inst.patients[p].est_urgent),
+                                  if v is not None and inst.patients[p].est_urgent),
             "urgents_sans_date": sum(1 for p in self.hors_horizon
-                                     if self.inst.patients[p].est_urgent),
+                                     if inst.patients[p].est_urgent),
             "taux_remplissage_moyen": sum(taux) / len(taux) if taux else 0.0,
+            "part_creux_utilisees": self.part_creux_utilisees(),
             "remplissage_ecart_type": self.variance_remplissage() ** 0.5,
             "creux_total_h": self.creux_total() / 60,
             "part_creux": self.creux_total() / tvo if tvo else 0.0,
             "lits_moyen": self.moyenne_lits(),
             "lits_ecart_type": self.variance_lits() ** 0.5,
-            "lits_pic": max(lits_ouvres, default=0),
-            "lits_creux": min(lits_ouvres, default=0),
+            "lits_pic": max(self.lits_jour, default=0),
+            "lits_creux": min(lits, default=0),
             "places_moyen": self.moyenne_places(),
             "places_ecart_type": self.variance_places() ** 0.5,
             "places_pic": max(places, default=0),
-            "surcharge_lits_j": sum(1 for n in lits_ouvres if n > self.inst.capacite_lits),
-            "surcharge_places_j": sum(1 for n in places if n > self.inst.capacite_places_jour),
+            "surcharge_lits_j": sum(1 for j in range(inst.nb_jours)
+                                    if self.lits_jour[j] > inst.cap_lits(j)),
+            "surcharge_places_j": sum(1 for j in self._jours_places
+                                      if self.places_jour[j] > inst.capacite_places_jour),
             "depassement_vacations_h": self.depassement_total() / 60,
-            "delai_moyen_j": self.delai_total() / max(1, len(self.inst.patients)),
+            "delai_moyen_j": self.delai_moyen(),
             "conflits": len(self.verifier()),
         }
 
@@ -1075,6 +1262,7 @@ class Creneau:
     lib_place: int      # instant de libération de la place / du lit
     place: int = -1     # numéro de place ambulatoire, ou de lit
     ambulatoire: bool = True
+    arrivee: int = -1   # prise de la place / du lit ce jour-là (cf. deriver_creneaux)
 
 
 @dataclass
@@ -1089,6 +1277,10 @@ class PlanningJour:
     sequences: dict[int, list[int]] = field(default_factory=dict)
     creneaux: dict[int, Creneau] = field(default_factory=dict)
     pic_places: int = 0
+    # Lits : l'occupation d'un lit dépend des patients opérés LES AUTRES
+    # jours. Si `deriver_creneaux` reçoit la solution globale, pic_lits =
+    # lits occupés la nuit du jour (tous patients) ; sinon = nombre
+    # d'hospitalisés OPÉRÉS ce jour-là (entrées du bloc), faute de mieux.
     pic_lits: int = 0
     depassement: int = 0
     hors_uca: int = 0
@@ -1116,7 +1308,8 @@ class PlanningJour:
 
 
 def deriver_creneaux(inst: Instance, jour: int,
-                     sequences: dict[int, list[int]]) -> PlanningJour:
+                     sequences: dict[int, list[int]],
+                     sol: "Solution | None" = None) -> PlanningJour:
     """Séquence -> horaires -> places. Le calcul déterministe du tabou n°2.
 
     ENCHAÎNEMENT AU PLUS TÔT. Chaque patient entre en salle dès que le
@@ -1135,8 +1328,9 @@ def deriver_creneaux(inst: Instance, jour: int,
 
     Trois étapes :
       1. on déroule chaque vacation au plus tôt ;
-      2. chaque patient occupe une place (ambulatoire, jusqu'à
-         `fin_op + surveillance`) ou un lit (jusqu'à la fermeture du jour) ;
+      2. chaque ambulatoire occupe une place de son ARRIVÉE,
+         max(ouverture_uca, début_op − avance_ambu), jusqu'à
+         `fin_op + surveillance` ; un hospitalisé occupe un lit ;
       3. on colorie les intervalles pour attribuer les numéros de place —
          étape OPTIMALE (cf. `colorier_intervalles`), donc tout le travail
          d'optimisation porte sur l'étape 1.
@@ -1158,8 +1352,10 @@ def deriver_creneaux(inst: Instance, jour: int,
                       else inst.tis)
             debut, fin = t, t + p.duree_op
             lib = fin + inst.surveillance_ambu if p.ambulatoire else fin_journee
+            arr = (max(inst.ouverture_uca, debut - inst.avance_ambu)
+                   if p.ambulatoire else fin)
             pj.creneaux[pid] = Creneau(pid, vid, v.bloc_id, debut, fin, lib,
-                                       ambulatoire=p.ambulatoire)
+                                       ambulatoire=p.ambulatoire, arrivee=arr)
             t = fin
             precedent = p
 
@@ -1172,19 +1368,21 @@ def deriver_creneaux(inst: Instance, jour: int,
     # -- places et lits : profil, pic, et FORME de la courbe ----------------
     ouverture = min((inst.vacations[vid].debut for vid in pj.sequences
                      if pj.sequences[vid]), default=8 * 60)
+    ouverture = min(ouverture, inst.ouverture_uca)    # les ambulatoires arrivent avant
 
-    ambulatoires = [(c.fin, c.lib_place) for c in pj.creneaux.values() if c.ambulatoire]
+    ambulatoires = [(c.arrivee, c.lib_place) for c in pj.creneaux.values() if c.ambulatoire]
     profil_places = profil_cumulatif(ambulatoires)
     pj.pic_places = pic(profil_places)
     pj.places_moyenne, pj.places_variance = moments_temporels(
         profil_places, ouverture, inst.fermeture_uca)
 
-    hospitalises = [(c.fin, c.lib_place) for c in pj.creneaux.values()
-                    if not c.ambulatoire]
-    pj.pic_lits = pic(profil_cumulatif(hospitalises))
+    if sol is not None:
+        pj.pic_lits = sol.lits_jour[jour]
+    else:
+        pj.pic_lits = sum(1 for c in pj.creneaux.values() if not c.ambulatoire)
 
     for ambu in (True, False):
-        items = [(c.patient_id, c.fin, c.lib_place)
+        items = [(c.patient_id, c.arrivee, c.lib_place)
                  for c in pj.creneaux.values() if c.ambulatoire == ambu]
         for pid, num in colorier_intervalles(items).items():
             pj.creneaux[pid].place = num
@@ -1248,15 +1446,30 @@ def profil_hebdo(sol: Solution) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 6. Fonctions coût du niveau global
+# 6. Fonction coût du niveau global
 # ---------------------------------------------------------------------------
-#   cout_ressources(sol) : places AMBULATOIRES + lits NON AMBULATOIRES
-#   cout_planning(sol)   : remplissage des vacations + délai des patients
-# Mesurées sur tout l'horizon, sans dimension (normalisées par les capacités
-# de l'instance, pas par une calibration). Contraintes dures : PENALITE par
-# unité de violation -> un individu réalisable a toujours un coût < PENALITE.
+#
+#   C = α·(w_places·P̃ + w_lits·L̃) + w_rempl·R̃ + w_délai·D̃
+#       + PENALITE · violations + PENALITE_NON_PLACE · non_placés
+#
+# Termes BRUTS (tous en O(1), lus dans les agrégats incrémentaux de Solution) :
+#   P = variance_places() / cap_places²   admissions ambulatoires, jours mesurés
+#   L = variance_lits()   / cap_lits²     lits, nuits mesurées
+#   R = part_creux_utilisees()            temps perdu / TVO, vacations utilisées
+#   D = délai moyen des placés / delai_max_programme
+# Termes NORMALISÉS : X̃ = X / X_ref, où X_ref est la valeur du terme sur une
+# solution de référence (`CoutTotal.calibrer`, ex. la gloutonne). Sans
+# calibration, les termes n'ont PAS le même ordre de grandeur (sur 2022 : le
+# délai pèse 10 à 100 fois plus que les lits) et les poids n'ont pas de sens.
+#
+# Contraintes dures : PENALITE par unité de violation (minutes de
+# dépassement, lits ou places en trop, UNE fois par jour même avec réserves)
+# -> un individu réalisable a un coût < PENALITE.
+# Patients à planifier sans vacation : PENALITE_NON_PLACE chacun, qui domine
+# les termes normalisés (~1) -> déplanifier ne fait jamais baisser le coût.
 
 PENALITE = 1e6
+PENALITE_NON_PLACE = 1e3
 
 
 def _variance(xs: list[float]) -> float:
@@ -1267,7 +1480,28 @@ def _variance(xs: list[float]) -> float:
     return sum((x - m) ** 2 for x in xs) / n
 
 
-# -- 6.1 Ressources ----------------------------------------------------------
+def terme_places(sol: Solution) -> float:
+    return sol.variance_places() / sol.inst.capacite_places_jour ** 2
+
+
+def terme_lits(sol: Solution) -> float:
+    return sol.variance_lits() / sol.inst.capacite_lits ** 2
+
+
+def terme_remplissage(sol: Solution) -> float:
+    return sol.part_creux_utilisees()
+
+
+def terme_delai(sol: Solution) -> float:
+    return sol.delai_moyen() / sol.inst.delai_max_programme
+
+
+def violations(sol: Solution) -> int:
+    """Minutes de dépassement + lits en trop + admissions en trop."""
+    return sol.s_dep + sol.s_exces_lits + sol.s_exces_places
+
+
+# -- fonctions par thème (interface inchangée, désormais O(1)) ----------------
 
 @dataclass
 class PoidsRessources:
@@ -1276,43 +1510,17 @@ class PoidsRessources:
 
 
 def cout_places(sol: Solution) -> float:
-    """Admissions ambulatoires par jour OUVRÉ (le week-end, pas d'ambulatoire).
-
-        C_places = Var_j(A_j) / cap_places_jour²  +  PENALITE · Σ_j max(0, A_j − cap)
-
-    A_j = nombre d'ambulatoires opérés le jour j (une place = une journée).
-    """
-    cap = sol.inst.capacite_places_jour
-    cap_prog = cap - sol.inst.reserve_places
-    a = [sol.places_jour[j] for j in sol._jours_places]
-    surcharge = (sum(max(0, x - cap) for x in a)
-                 + sum(max(0, sol.places_jour[j] - sol.places_urg_jour[j] - cap_prog)
-                       for j in sol._jours_places))
-    return _variance(a) / cap ** 2 + PENALITE * surcharge
+    return terme_places(sol) + PENALITE * sol.s_exces_places
 
 
 def cout_lits(sol: Solution) -> float:
-    """Lits occupés chaque NUIT, week-end compris.
-
-        C_lits = Var_j(L_j) / cap_lits²  +  PENALITE · Σ_j max(0, L_j − cap)
-
-    L_j = patients non ambulatoires présents la nuit j (durée de séjour n
-    -> n − 1 nuits à partir du jour opéré).
-    """
-    cap = sol.inst.capacite_lits
-    cap_prog = cap - sol.inst.reserve_lits
-    l = list(sol.lits_jour)
-    surcharge = (sum(max(0, x - cap) for x in l)
-                 + sum(max(0, x - u - cap_prog) for x, u in zip(l, sol.lits_urg_jour)))
-    return _variance(l) / cap ** 2 + PENALITE * surcharge
+    return terme_lits(sol) + PENALITE * sol.s_exces_lits
 
 
 def cout_ressources(sol: Solution, w: PoidsRessources | None = None) -> float:
     w = w or PoidsRessources()
     return w.places * cout_places(sol) + w.lits * cout_lits(sol)
 
-
-# -- 6.2 Planning ------------------------------------------------------------
 
 @dataclass
 class PoidsPlanning:
@@ -1321,44 +1529,11 @@ class PoidsPlanning:
 
 
 def cout_remplissage(sol: Solution) -> float:
-    """Pour chaque chirurgien m, variance des taux de remplissage τ_v de SES
-    vacations (vides comprises, taux 0), puis moyenne sur les chirurgiens :
-
-        C_rempl = (1/|M|) Σ_m Var_{v ∈ V_m}(τ_v)  +  PENALITE · Σ_v dépassement_v
-
-    τ_v = charge_v / TVO_v ∈ [0, 1] sans dépassement : déjà sans dimension.
-    On compare un chirurgien à LUI-MÊME, pas aux autres.
-    """
-    inst = sol.inst
-    variances = [_variance([sol.taux_remplissage(v) for v in vids])
-                 for vids in inst.vacations_du_medecin.values() if vids]
-    depassement = sum(sol.depassement(v) + sol.depassement_programme(v)
-                      for v in inst.vacations)
-    moy = sum(variances) / len(variances) if variances else 0.0
-    return moy + PENALITE * depassement
+    return terme_remplissage(sol) + PENALITE * sol.s_dep
 
 
 def cout_delai(sol: Solution) -> float:
-    """Délai moyen au-delà du délai minimum, rapporté à l'horizon :
-
-        C_delai = Σ_p π_p · (jour_p − jour_min_p) / (N · nb_jours)
-
-    jour_min_p = jour_demande + fenetre_jours : le délai minimal imposé n'est
-    pas un retard. Patients comptés : ceux qui ont une vacation, plus ceux
-    `hors_horizon` (vus en consultation, sans date), comptés comme opérés à
-    nb_jours — sinon ne pas placer un patient serait gratuit. Les `sans_date`
-    pas encore vus en consultation n'existent pas pour le planning.
-    """
-    inst = sol.inst
-    total, n = 0.0, 0
-    for pid, vid in sol.affectation.items():
-        if vid is None and pid not in sol.hors_horizon:
-            continue
-        p = inst.patients[pid]
-        jour = inst.vacations[vid].jour if vid is not None else inst.nb_jours
-        total += p.priorite * max(0, jour - (p.jour_demande + p.fenetre_jours))
-        n += 1
-    return total / (n * inst.nb_jours) if n else 0.0
+    return terme_delai(sol) + PENALITE_NON_PLACE * sol.nb_non_places()
 
 
 def cout_planning(sol: Solution, w: PoidsPlanning | None = None) -> float:
@@ -1366,22 +1541,49 @@ def cout_planning(sol: Solution, w: PoidsPlanning | None = None) -> float:
     return w.remplissage * cout_remplissage(sol) + w.delai * cout_delai(sol)
 
 
-# -- 6.3 Coût total ------------------------------------------------------------
+# -- coût total -------------------------------------------------------------------
 
 @dataclass
 class CoutTotal:
-    """Appelable : `cout(sol) -> float`. `alpha` = poids ressources / planning."""
+    """Appelable : `cout(sol) -> float`, en O(1).
+
+    Usage :
+        cout = CoutTotal(PoidsRessources(1, 2), PoidsPlanning(1, 0.5))
+        cout.calibrer(sol_gloutonne)     # normalisation (fortement conseillé)
+        c = cout(sol)
+    `alpha` = poids relatif ressources / planning. Les poids ne sont
+    interprétables qu'APRÈS `calibrer`.
+    """
     w_ressources: PoidsRessources | None = None
     w_planning: PoidsPlanning | None = None
     alpha: float = 1.0
+    ref: dict | None = None      # valeurs de référence des 4 termes
+
+    def calibrer(self, sol: Solution) -> "CoutTotal":
+        t = self.termes(sol)
+        self.ref = {k: (t[k] if t[k] > 1e-12 else 1.0)
+                    for k in ("places", "lits", "remplissage", "delai")}
+        return self
 
     def termes(self, sol: Solution) -> dict:
-        return {"places": cout_places(sol), "lits": cout_lits(sol),
-                "remplissage": cout_remplissage(sol), "delai": cout_delai(sol)}
+        """Termes BRUTS (non normalisés) + contraintes."""
+        return {"places": terme_places(sol), "lits": terme_lits(sol),
+                "remplissage": terme_remplissage(sol), "delai": terme_delai(sol),
+                "violations": violations(sol), "non_places": sol.nb_non_places()}
+
+    def termes_normalises(self, sol: Solution) -> dict:
+        t = self.termes(sol)
+        ref = self.ref or {}
+        return {k: t[k] / ref.get(k, 1.0) for k in ("places", "lits", "remplissage", "delai")}
 
     def __call__(self, sol: Solution) -> float:
-        return (self.alpha * cout_ressources(sol, self.w_ressources)
-                + cout_planning(sol, self.w_planning))
+        wr = self.w_ressources or PoidsRessources()
+        wp = self.w_planning or PoidsPlanning()
+        n = self.termes_normalises(sol)
+        return (self.alpha * (wr.places * n["places"] + wr.lits * n["lits"])
+                + wp.remplissage * n["remplissage"] + wp.delai * n["delai"]
+                + PENALITE * violations(sol)
+                + PENALITE_NON_PLACE * sol.nb_non_places())
 
 
 # ---------------------------------------------------------------------------
