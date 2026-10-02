@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nouvelle grille par algorithme génétique</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+
+:root{
+  --fond:#f4f5f7; --carte:#ffffff; --encre:#14171c; --encre-2:#4a5160; --encre-3:#767d8b;
+  --trait:#dde0e6; --trait-fort:#c3c8d1; --grille:#eceef2; --bande:#f0f1f4;
+  --s-new:#2a78d6; --s-act:#eb6834; --s-ctl:#1baf7a; --s-reel:#8a909c;
+  --mauvais:#b8372a; --bon:#0f7a3a; --bon-fond:#e5f4ea; --mauvais-fond:#fbe9e6;
+  --neutre-fond:#eef0f3; --choisi-fond:#e3eefb; --reserve-fond:#f1f1ee;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --r:8px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --fond:#0f1115; --carte:#171a20; --encre:#eef0f4; --encre-2:#b4bac6; --encre-3:#858c99;
+    --trait:#2a2f38; --trait-fort:#3a404b; --grille:#21252c; --bande:#1c2027;
+    --s-new:#3987e5; --s-act:#d95926; --s-ctl:#199e70; --s-reel:#7d8491;
+    --mauvais:#ef7a6c; --bon:#4cc47a; --bon-fond:#15301f; --mauvais-fond:#3a1f1c;
+    --neutre-fond:#20242b; --choisi-fond:#16304f; --reserve-fond:#1d2026;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --fond:#0f1115; --carte:#171a20; --encre:#eef0f4; --encre-2:#b4bac6; --encre-3:#858c99;
+  --trait:#2a2f38; --trait-fort:#3a404b; --grille:#21252c; --bande:#1c2027;
+  --s-new:#3987e5; --s-act:#d95926; --s-ctl:#199e70; --s-reel:#7d8491;
+  --mauvais:#ef7a6c; --bon:#4cc47a; --bon-fond:#15301f; --mauvais-fond:#3a1f1c;
+  --neutre-fond:#20242b; --choisi-fond:#16304f; --reserve-fond:#1d2026;
+}
+*{box-sizing:border-box}
+body{background:var(--fond);color:var(--encre);font-family:var(--sans);font-size:15px;line-height:1.55;
+  padding-inline:16px;padding-block:28px 56px}
+.page{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1,h2,h3{text-wrap:balance;margin:0;font-weight:600;letter-spacing:-.01em}
+h1{font-size:clamp(26px,4.2vw,36px);line-height:1.12}
+h2{font-size:19px}
+h3{font-size:14.5px;font-weight:600}
+p{margin:0;max-width:72ch}
+.eyebrow{font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--encre-3);font-weight:500}
+.lede{color:var(--encre-2);font-size:16px}
+header{display:flex;flex-direction:column;gap:10px}
+.verdict{background:var(--carte);border:1px solid var(--trait);border-left:4px solid var(--s-new);
+  border-radius:var(--r);padding:14px 18px;display:flex;flex-direction:column;gap:8px}
+.verdict ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;max-width:76ch}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--trait);
+  border:1px solid var(--trait);border-radius:var(--r);overflow:hidden}
+@media (max-width:760px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{background:var(--carte);padding:13px 15px;display:flex;flex-direction:column;gap:4px}
+.kpi .k{font-size:12.5px;color:var(--encre-3)}
+.kpi .l{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.kpi .v{font-family:var(--mono);font-size:24px;font-weight:500}
+.kpi .ref{font-family:var(--mono);font-size:12.5px;color:var(--encre-3)}
+.puce{align-self:flex-start;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px}
+.puce.bon{color:var(--bon);background:var(--bon-fond)}
+.puce.neutre{color:var(--encre-2);background:var(--neutre-fond)}
+section.bloc{background:var(--carte);border:1px solid var(--trait);border-radius:var(--r);
+  padding:20px;display:flex;flex-direction:column;gap:14px}
+.entete{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.legende{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--encre-2)}
+.legende span{display:inline-flex;align-items:center;gap:6px}
+.legende i{width:12px;height:12px;border-radius:2px;display:inline-block}
+.legende i.ligne{height:3px;width:14px}
+.legende i.tirets{height:0;width:16px;border-top:2px dashed var(--s-reel);background:none!important}
+.note{font-size:13.5px;color:var(--encre-2)}
+figure{margin:0;position:relative}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.bulle{position:absolute;pointer-events:none;background:var(--carte);border:1px solid var(--trait-fort);
+  border-radius:6px;padding:8px 10px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.12);
+  opacity:0;transition:opacity .1s;min-width:160px;z-index:2}
+.bulle b{display:block;margin-bottom:4px;font-weight:600}
+.bulle .l{display:flex;justify-content:space-between;gap:14px;color:var(--encre-2)}
+.bulle .l span:first-child{display:inline-flex;align-items:center;gap:6px}
+.bulle .l i{width:8px;height:8px;border-radius:2px;display:inline-block}
+.bulle .l span:last-child{font-family:var(--mono);color:var(--encre)}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:6px 9px;text-align:right;border-bottom:1px solid var(--trait);white-space:nowrap}
+th{font-weight:500;color:var(--encre-3);font-size:11.5px;vertical-align:bottom}
+td{font-family:var(--mono);font-variant-numeric:tabular-nums}
+th.g,td.g{text-align:left;font-family:var(--sans)}
+tr.choisie td{background:var(--choisi-fond);font-weight:500}
+tr.groupe td{font-family:var(--sans);font-size:11px;color:var(--encre-3);text-transform:uppercase;
+  letter-spacing:.06em;padding-top:12px;border-bottom:1px solid var(--trait-fort)}
+td.mauvais{color:var(--mauvais)}
+td.bon{color:var(--bon);font-weight:500}
+.formule{font-family:var(--mono);font-size:13.5px;background:var(--neutre-fond);border-radius:6px;
+  padding:10px 14px;overflow-x:auto;white-space:pre;line-height:1.7}
+.etapes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:860px){.etapes{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){.etapes{grid-template-columns:1fr}}
+.etape{border:1px solid var(--trait);border-radius:6px;padding:11px 13px;display:flex;flex-direction:column;gap:5px}
+.etape .n{font-family:var(--mono);font-size:11.5px;color:var(--encre-3)}
+.etape .t{font-weight:600;font-size:14px}
+.etape .d{font-size:13px;color:var(--encre-2)}
+.etape .r{font-size:12.5px;font-family:var(--mono);color:var(--encre)}
+.grille{border-collapse:separate;border-spacing:3px;font-size:12px;width:100%}
+.grille th{font-size:11.5px;text-align:center;color:var(--encre-3);font-weight:500;padding:4px}
+.grille th.jour{text-align:left;color:var(--encre);font-weight:600;font-size:12.5px}
+.grille td{padding:0;border:none;vertical-align:top;font-family:var(--sans);text-align:left}
+.cellule{display:flex;flex-direction:column;gap:3px;min-width:92px}
+.bk{border:1px solid var(--trait);border-radius:5px;padding:2px 7px;display:flex;justify-content:space-between;gap:6px}
+.bk .qui{font-weight:600;font-family:var(--mono)}
+.bk .h{color:var(--encre-3);font-family:var(--mono);font-size:10.5px}
+.bk.reserve{background:var(--reserve-fond);color:var(--encre-3)}
+.bk.reserve .qui{font-weight:500}
+.bk.ferme{border-style:dashed;color:var(--encre-3)}
+.bk.ferme .qui{font-weight:400}
+ol.options{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;max-width:76ch}
+footer{font-size:12.5px;color:var(--encre-3)}
+code{font-family:var(--mono);font-size:.92em;background:var(--neutre-fond);padding:1px 5px;border-radius:4px}
+
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+:root{--s-pl:#8a55d4}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--s-pl:#a47ce9}}
+:root[data-theme="dark"]{--s-pl:#a47ce9}
+.puce.mauvais{color:var(--mauvais);background:var(--mauvais-fond)}
+.multiples{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:760px){.multiples{grid-template-columns:1fr}}
+.multiples figure{border:1px solid var(--trait);border-radius:6px;padding:10px 10px 4px}
+.multiples h3{font-size:13px;font-weight:500;color:var(--encre-2);margin:0 0 4px 4px}
+td.moyen{color:var(--encre-2)}
+.grille th,.grille td{vertical-align:top}
+.grille th{padding-top:7px}
+.grille tr.debut-jour>*{padding-top:12px}
+.grille tr.debut-jour th.jour{border-top:1px solid var(--trait-fort)}
+</style></head><body>
+<div class="page">
+<header>
+  <div class="eyebrow">Bloc opératoire · Centrale 2026 · méthode algorithme génétique</div>
+  <h1>Nouvelle grille et fonction coût : ce que donne l'algorithme génétique</h1>
+  <p class="lede">Un algorithme génétique reconstruit la grille des vacations à partir de janvier–avril 2022. Les patients
+  de 2022 sont ensuite insérés un par un, notés par la fonction coût du groupe (<code>CoutTotal</code> : lits, places,
+  remplissage, délai), et un second AG ordonne chaque journée une fois figée. Tout est mesuré sur mai–décembre 2022,
+  des mois que la grille n'a jamais vus.</p>
+</header>
+
+<div class="verdict">
+  <strong>Les lits et les places se lissent, mais le délai se dégrade : la fonction coût obtient le lissage en repoussant des patients.</strong>
+  <ul>
+    <li>Places ambulatoires par jour ouvré : l'écart-type passe de 3,21 (grille actuelle simulée) à 2,10, et le pic de 14 à
+      11 admissions. L'hôpital réel était à 3,77 et 17.</li>
+    <li>Lits, nuits de semaine : l'écart-type passe de 2,51 à 1,91 et le pic de 18 à 17 lits. Sur toutes les nuits,
+      week-ends compris, la variance ne bouge pas (11,98 → 12,08). La fonction coût ne mesure que les jours ouvrés, donc le
+      week-end reste creux.</li>
+    <li>Patients sans date : 144 → 2. Ce gain vient du <strong>volume</strong> et non de la répartition : la nouvelle grille
+      offre 174 h par semaine au lieu de 139 (+25 %), parce qu'elle est dimensionnée pour contenir les marges P90.</li>
+    <li>Délai médian entre consultation et opération : 57 → 91 jours. Avec la même nouvelle grille et la règle du premier
+      créneau libre, il tombe à 18 jours, mais le lissage disparaît. Dans une décision, le terme délai de <code>CoutTotal</code>
+      pèse presque rien face aux termes de variance.</li>
+    <li>L'AG journalier ne change presque rien : le pic de places occupées en même temps passe de 6,49 à 6,40. Aucun
+      dépassement de vacation n'est prévu, dans aucune configuration.</li>
+  </ul>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<section class="bloc">
+  <div class="entete"><h2>Grille ou règle d'insertion : qui fait quoi ?</h2></div>
+  <p class="note">Deux choix se superposent : la grille (actuelle ou reconstruite par l'AG) et la règle qui choisit la date
+  de chaque patient (premier créneau libre, ou <code>CoutTotal</code> avec tous les poids à ×1). Les quatre combinaisons,
+  sur mai–décembre 2022 :</p>
+  <div class="tablewrap"><table id="tb-2x2"></table></div>
+  <p class="note"><strong>La grille apporte la capacité</strong> : avec la nouvelle grille, presque tout le monde a une date
+  et le délai s'effondre (18 jours au premier créneau libre). <strong>La règle d'insertion apporte le lissage</strong> : sur
+  la même nouvelle grille, <code>CoutTotal</code> divise par deux l'écart-type des lits en semaine (3,93 → 1,91) et réduit
+  celui des places d'un tiers (3,14 → 2,10). Elle y parvient en plaçant les patients sur les jours les moins chargés, qui
+  sont souvent plus lointains : le délai médian passe de 18 à 91 jours.</p>
+</section>
+
+<section class="bloc">
+  <div class="entete">
+    <h2>Le mécanisme : une semaine à plat, un week-end inchangé</h2>
+    <div class="legende" id="lg-jds"></div>
+  </div>
+  <p class="note">Lits occupés en moyenne selon la nuit de la semaine, de mai à décembre. Avec la grille actuelle, les lits
+  culminent le jeudi (12,3) et retombent le vendredi (8,4). Le planning AG met les cinq nuits de semaine entre 10,9 et
+  11,6. Le samedi (6,1) et le dimanche (4,3) ne bougent presque pas, parce que les variances de <code>CoutTotal</code>
+  et de la fitness de la grille ne comptent que les jours ouvrés, par décision du groupe. Pour vider moins le week-end, il
+  faudrait les compter, comme le fait le rapport sur le tabou.</p>
+  <figure id="g-jds"></figure>
+</section>
+
+<section class="bloc">
+  <div class="entete">
+    <h2>Distribution des lits occupés, nuit par nuit</h2>
+    <div class="legende" id="lg-hist"></div>
+  </div>
+  <p class="note">Nombre de nuits, de mai à décembre 2022, où l'on compte tel nombre de lits occupés, week-ends compris.</p>
+  <figure id="g-hist"></figure>
+  <div class="tablewrap"><table id="tb-lits"></table></div>
+  <p class="note">La moyenne varie peu (8,4 à 9,6) : elle vaut le total des nuits divisé par le nombre de nuits, fixé par les
+  patients. Elle est plus basse avec la grille actuelle parce que 144 patients n'y ont pas de date et que d'autres sont
+  repoussés en 2023. L'hôpital réel est beaucoup plus dispersé que toutes les simulations : ses semaines chargées et ses
+  semaines creuses (congés) ne sont pas lissées par une règle d'insertion.</p>
+</section>
+
+<section class="bloc">
+  <div class="entete">
+    <h2>Places ambulatoires : le vrai gain</h2>
+    <div class="legende" id="lg-pl"></div>
+  </div>
+  <p class="note">Nombre de jours ouvrés, de mai à décembre, où l'on admet tel nombre de patients ambulatoires. Avec le
+  planning AG, 80 % des jours sont entre 4 et 9 admissions ; il n'y a plus de journée à plus de 11.</p>
+  <figure id="g-pl"></figure>
+  <div class="tablewrap"><table id="tb-pl"></table></div>
+</section>
+
+<section class="bloc">
+  <div class="entete">
+    <h2>Sur l'année</h2>
+    <div class="legende" id="lg-sem"></div>
+  </div>
+  <p class="note">Lits occupés, moyenne par semaine. Zone grisée : janvier–avril, période d'apprentissage de la grille ;
+  les mois suivants sont hors échantillon.</p>
+  <figure id="g-sem"></figure>
+</section>
+
+<section class="bloc">
+  <h2>Remplissage des vacations et patients opérés par semaine</h2>
+  <div class="tablewrap"><table id="tb-rempl"></table></div>
+  <p class="note"><strong>La nouvelle grille opère plus de patients par semaine</strong> (62 contre 55) : avec la grille actuelle,
+  144 patients n'ont pas de date et d'autres sont repoussés au-delà de décembre.</p>
+  <p class="note"><strong>Le remplissage baisse</strong> (77 % → 70 % du temps offert, marges comprises) parce que l'offre augmente
+  plus vite que la demande. Les heures offertes ont été calibrées sur janvier–avril, un hiver plus chargé que le reste de
+  l'année (section 2).</p>
+</section>
+
+<section class="bloc">
+  <h2>1. Le découpage</h2>
+  <p class="note" id="decoupage"></p>
+</section>
+
+<section class="bloc">
+  <h2>2. Le besoin de chaque médecin, en heures par semaine</h2>
+  <p class="note">Pour chaque intervention, on compte la durée estimée (médiane 2019–2021 du même acte), la marge P90 et le
+  temps inter-salle, comme dans les simulations. On fait la somme par médecin, puis on divise par le nombre de semaines de la
+  période. Le quota de demi-journées par cycle de 4 semaines vaut ce besoin divisé par 90 % de 4,5 h.</p>
+  <div class="tablewrap"><table id="tb-besoin"></table></div>
+  <p class="note">L'hiver surestime le reste de l'année pour plusieurs médecins : CL passe de 26,6 à 21,2 h par semaine, JT de
+  22,7 à 17,0, LZ de 11,0 à 6,8. Aucun ne manque de temps, ce qui explique le peu de patients sans date. En revanche, la
+  grille offre trop, et le remplissage baisse.</p>
+</section>
+
+<section class="bloc">
+  <h2>3. Les fonctions coût</h2>
+  <p class="note"><strong>Grille</strong> (fitness de l'AG, analytique, en régime permanent sur le cycle de 28 jours) :</p>
+  <div class="formule">F = w_lits · L/L₀ + w_places · P/P₀ + w_rempl · R/R₀ + w_délai · D/D₀ + w_salles · S/S₀
+  + 100 × (lits et places attendus au-delà des capacités hors réserves)
+
+L  variance des lits attendus, nuits de semaine        P  variance des admissions ambulatoires attendues
+R  temps perdu / TVO                                   D  attente moyenne jusqu'à la prochaine vacation du médecin
+S  salles-jours ouvertes                               X₀ valeur du terme pour la grille actuelle</div>
+  <p class="note">Les lits attendus viennent du profil de séjour de chaque médecin, mesuré sur janvier–avril : une minute
+  opérée le jour j occupe k<sub>m</sub>(o) lits la nuit j + o (nuits avant l'opération comprises). On calcule une convolution
+  circulaire sur le cycle. Le temps perdu compte une demi-durée d'acte par vacation : une journée entière perd moins qu'un
+  matin et un après-midi séparés.</p>
+  <p class="note"><strong>Insertion</strong> (<code>CoutTotal</code> de <code>modele.py</code>, évalué pour chaque vacation
+  candidate) :</p>
+  <div class="formule">C = w_places · P/P₀ + w_lits · L/L₀ + w_rempl · R/R₀ + w_délai · D/D₀
+  + 10⁶ × violations + 10³ × patients non placés
+
+P, L  variances sur les jours ouvrés d'une fenêtre de 91 jours
+R     temps perdu / TVO des vacations utilisées
+D     délai moyen des patients placés / 182 j
+X₀    valeur du terme pour « grille actuelle, premier créneau libre »</div>
+  <p class="note">Les contraintes dures sont les mêmes partout : aucun dépassement de vacation (marges P90 comprises), un
+  tampon de 5 % du TVO, 2 lits et 2 admissions réservés aux urgences, les créneaux URGENCES conservés. On ne propose
+  que les 12 premières vacations réalisables, les deux meilleures au sens de <code>C</code>, et le patient prend la plus tôt.</p>
+</section>
+
+<section class="bloc">
+  <h2>4. L'algorithme génétique de la grille</h2>
+  <div class="etapes" id="etapes"></div>
+  <p class="note"><strong>Toujours faisable.</strong> Les opérateurs ne produisent que des grilles où chaque médecin a son
+  quota et n'est jamais dans deux salles à la fois ; il n'y a donc pas de pénalité à régler pour ces contraintes. La
+  réparation après croisement retire d'abord les demi-journées isolées, puis complète en privilégiant les journées entières.</p>
+  <figure id="g-conv"></figure>
+  <p class="note">Coût de la meilleure grille à chaque génération, configuration de référence. L'AG utilise les 300
+  générations sans jamais s'arrêter faute de progrès : on pourrait encore gagner en allongeant la recherche.</p>
+</section>
+
+<section class="bloc">
+  <h2>5. Faire varier les coefficients</h2>
+  <p class="note">On part de tous les poids à ×1, et on multiplie un seul coefficient par 0, ¼, 4 ou 16. Le même poids
+  sert à la grille, à l'insertion et, pour les places et le remplissage, à l'AG journalier. Les graines aléatoires sont
+  identiques pour toutes les configurations. Dans le tableau, la ligne surlignée est la configuration de référence ; les
+  valeurs en vert sont nettement meilleures qu'elle, en rouge nettement moins bonnes.</p>
+  <div class="multiples" id="g-sens"></div>
+  <div class="tablewrap"><table id="tb-var"></table></div>
+  <p class="note"><strong>Lits et places répondent à leur poids.</strong> Le poids des lits fait passer l'écart-type en
+  semaine de 3,47 (×0) à 1,24 (×16). Celui des places fait passer l'écart-type des admissions de 3,90 à 0,70. Chacun ne
+  coûte presque rien à l'autre.</p>
+  <p class="note"><strong>Le poids du remplissage ne sert à rien, ou nuit.</strong> Le remplissage reste entre 68 et 71 %
+  quel que soit son poids, parce qu'il est fixé par les quotas de la grille. À ×0, les deux lissages sont même les
+  meilleurs du tableau (1,38 et 0,77) et le délai médian baisse à 73 jours.</p>
+  <p class="note"><strong>Le poids du délai est trop faible pour arbitrer.</strong> Même à ×16, le délai médian ne descend
+  qu'à 84 jours. Le terme est une moyenne sur tous les patients placés : poser un patient un mois plus tard ne le déplace
+  presque pas, alors que les variances, calculées sur une fenêtre dont la fin est encore vide, réagissent fortement.</p>
+</section>
+
+<section class="bloc">
+  <h2>6. L'optimisation journalière</h2>
+  <p class="note">Les journées du planning de référence sont fixées, et l'on fait varier les poids du seul AG journalier
+  sur les 169 jours ouvrés de test (environ 13 patients par jour). La comparaison se fait avec l'ordre d'inscription. Les
+  poids des lits et du délai n'ont aucun levier à ce niveau, puisque le jour est déjà fixé.</p>
+  <div class="tablewrap"><table id="tb-jour"></table></div>
+  <p class="note">Les écarts sont faibles : l'ordre de passage ne change ni le nombre de patients, ni la somme des durées.
+  Seul le temps inter-salle réduit, entre deux actes identiques, fait gagner quelques minutes. Rejoué avec les durées
+  réelles, l'ordre choisi laisse 7 vacations déborder sur 169 jours, autant que l'ordre d'inscription.</p>
+</section>
+
+<section class="bloc">
+  <div class="entete">
+    <h2>La grille retenue</h2>
+    <div class="legende"><span><i style="border:1px solid var(--trait)"></i>créneau attribué</span>
+      <span><i style="background:var(--reserve-fond);border:1px solid var(--trait)"></i>réservé urgences</span>
+      <span><i style="border:1px dashed var(--trait-fort)"></i>fermé</span></div>
+  </div>
+  <p class="note">Configuration de référence (tous les poids ×1), cycle de 4 semaines : la semaine n du cycle correspond aux
+  semaines ISO dont le numéro vaut n − 1 modulo 4. Chaque case montre le matin puis l'après-midi ; « journée » signifie le
+  même médecin de 8h à 17h30.</p>
+  <div class="tablewrap"><table class="grille" id="grille"></table></div>
+  <div class="tablewrap"><table id="tb-jours"></table></div>
+</section>
+
+<section class="bloc">
+  <h2>Limites et suite</h2>
+  <ol class="options">
+    <li><strong>Le délai doit peser dans chaque décision.</strong> On peut noter le délai du patient lui-même plutôt que la
+      moyenne de tous, ou donner à l'insertion la cible « charge future attendue » prévue par <code>modele.py</code>
+      (<code>cible_lits</code>, <code>cible_places</code>), pour que les jours lointains, encore vides, cessent d'attirer.
+      C'est la correction prioritaire.</li>
+    <li><strong>Comparer à moyens égaux.</strong> La nouvelle grille offre 25 % d'heures en plus que la grille actuelle. Le
+      rapport sur le tabou fixe le budget à celui d'aujourd'hui ; il faut ajouter cette contrainte à l'AG pour comparer les
+      deux méthodes.</li>
+    <li><strong>Compter le week-end</strong> dans les variances, si le groupe veut lisser aussi le samedi et le dimanche.</li>
+    <li><strong>Apprendre le besoin sur une année entière.</strong> Janvier–avril surestime le reste de l'année.</li>
+    <li><strong>Robustesse.</strong> Une seule graine par configuration. L'AG de grille n'a pas convergé en 300 générations.
+      SM est exclu du périmètre.</li>
+  </ol>
+</section>
+
+<footer>Notebook <code>Fil_Rouge_analyse_couts_AG.ipynb</code> exécuté en mode complet (17 configurations globales, 9
+journalières). Modules : <code>genetique_grille.py</code> (AG de grille), <code>analyse_couts.py</code> (insertion,
+journées, mesures), <code>genetique_jour.py</code> et <code>modele.py</code> (communs au groupe). Périmètre : 3 467 patients
+2022, 17 chirurgiens (SM exclu). La décomposition grille / règle d'insertion vient de deux simulations en plus, faites
+avec les mêmes fonctions et la graine 0.</footer>
+</div>
+
+<script id="donnees" type="application/json">__DATA__</script>
+<script>
+(function(){
+"use strict";
+const D=JSON.parse(document.getElementById('donnees').textContent),P=D.P;
+const NS='http://www.w3.org/2000/svg';
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const el=(t,a={})=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
+const fr=(n,d=0)=>n==null?'–':Number(n).toLocaleString('fr-FR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const $=id=>document.getElementById(id);
+function bulle(h){const b=document.createElement('div');b.className='bulle';h.appendChild(b);
+  return{montre(x,y,html){b.innerHTML=html;b.style.opacity='1';const w=b.offsetWidth;
+    b.style.left=Math.max(0,Math.min(x+14,h.clientWidth-w-2))+'px';b.style.top=Math.max(0,y-12)+'px';},cache(){b.style.opacity='0';}};}
+const leg=(id,items)=>$(id).innerHTML=items.map(([c,t,tir])=>tir?`<span><i class="tirets"></i>${t}</span>`:`<span><i style="background:${css(c)}"></i>${t}</span>`).join('');
+const txt=(svg,x,y,s,o={})=>{const t=el('text',Object.assign({x,y,fill:css('--encre-3'),'font-size':12},o));t.textContent=s;svg.appendChild(t);return t;};
+
+const A=P.actuelle,G=P.ag,S=P.sans_lits,R=P.reel,AC=P.actuelle_cout,GP=P.ag_premier;
+const SER={reel:['Hôpital réel','--s-reel'],actuelle:['Grille actuelle','--s-act'],ag:['Planning AG','--s-new'],sans_lits:['AG sans terme des lits','--s-ctl']};
+
+/* ---- tuiles ---- */
+const tuile=(k,v,a,d,cl,p)=>`<div class="kpi"><span class="k">${k}</span><div class="l"><span class="v">${fr(v,d)}</span>
+  <span class="ref">actuelle ${fr(a,d)}</span></div><span class="puce ${cl}">${p}</span></div>`;
+const pc=(n,o)=>`${n<o?'−':'+'}${fr(Math.abs(100*(n/o-1)))} %`;
+$('kpis').innerHTML=[
+  tuile('Écart-type des places / jour',G.places.stats.ecart_type,A.places.stats.ecart_type,2,'bon',pc(G.places.stats.ecart_type,A.places.stats.ecart_type)),
+  tuile('Écart-type des lits, nuits de semaine',G.lits.stats_ouvres.ecart_type,A.lits.stats_ouvres.ecart_type,2,'bon',pc(G.lits.stats_ouvres.ecart_type,A.lits.stats_ouvres.ecart_type)),
+  tuile('Patients sans date',G.planning.sans_date,A.planning.sans_date,0,'neutre','gain de volume, +25 % d\'heures'),
+  tuile('Délai médian (jours)',G.planning.delai_median,A.planning.delai_median,0,'mauvais',`+${fr(G.planning.delai_median-A.planning.delai_median)} jours`),
+].join('');
+
+/* ---- barres groupées ---- */
+function barres(id,series,etiq,o){
+  const hote=$(id);
+  const W=960,H=o.h||260,M={t:12,r:10,b:30,l:42},pw=W-M.l-M.r,ph=H-M.t-M.b;
+  const max=o.max,Y=v=>M.t+ph*(1-v/max),bande=pw/etiq.length,ns=series.length,gap=2;
+  const larg=Math.min(o.larg||30,(bande*.8-gap*(ns-1))/ns);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,role:'img','aria-label':o.alt});
+  for(let k=0;k<=4;k++){const v=max*k/4;svg.appendChild(el('line',{x1:M.l,x2:W-M.r,y1:Y(v),y2:Y(v),stroke:css('--grille')}));
+    txt(svg,M.l-8,Y(v)+4,fr(v),{'text-anchor':'end','font-family':css('--mono')});}
+  svg.appendChild(el('line',{x1:M.l,x2:W-M.r,y1:M.t+ph,y2:M.t+ph,stroke:css('--trait-fort')}));
+  const tip=bulle(hote);
+  etiq.forEach((lab,i)=>{const cx=M.l+bande*(i+.5),x0=cx-(ns*larg+(ns-1)*gap)/2;
+    series.forEach((s,k)=>{const v=s.v[i]||0,x=x0+k*(larg+gap),y=Y(v),h=M.t+ph-y;
+      if(h>0){const rr=Math.min(3,larg/2,h);svg.appendChild(el('path',{d:`M${x},${M.t+ph}V${y+rr}Q${x},${y} ${x+rr},${y}H${x+larg-rr}Q${x+larg},${y} ${x+larg},${y+rr}V${M.t+ph}Z`,fill:css(s.c)}));}});
+    if(!o.pas||i%o.pas===0)txt(svg,cx,H-9,lab,{'text-anchor':'middle'});
+    const hit=el('rect',{x:cx-bande/2,y:M.t,width:bande,height:ph,fill:'transparent'});svg.appendChild(hit);
+    hit.addEventListener('pointerenter',()=>{const r=svg.getBoundingClientRect();
+      let h=`<b>${o.tt?o.tt(lab):lab}</b>`;series.forEach(s=>h+=`<div class="l"><span><i style="background:${css(s.c)}"></i>${s.n}</span><span>${o.ft(s.v[i]||0)}</span></div>`);
+      tip.montre(cx/W*r.width,Y(Math.max(...series.map(s=>s.v[i]||0)))/H*r.height,h);});
+    hit.addEventListener('pointerleave',()=>tip.cache());});
+  hote.appendChild(svg);
+}
+
+/* ---- courbes ---- */
+function courbes(hote,series,labels,o){
+  const n=labels.length,W=o.W||960,H=o.h||270,M={t:12,r:14,b:30,l:44},pw=W-M.l-M.r,ph=H-M.t-M.b;
+  const all=series.flatMap(s=>s.v.filter(v=>v!=null)).concat((o.hlines||[]).map(h=>h.v));
+  const lo=o.min!=null?o.min:Math.min(...all),hi=o.max!=null?o.max:Math.max(...all);
+  const nice=v=>{const e=Math.pow(10,Math.floor(Math.log10(v)));const f=v/e;return (f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*e;};
+  const pas=nice(Math.max(hi-lo,1e-9)/4),y0=Math.floor(lo/pas+1e-9)*pas,y1=Math.ceil(hi/pas-1e-9)*pas,nt=Math.round((y1-y0)/pas);
+  const X=i=>M.l+(n>1?pw*i/(n-1):pw/2),Y=v=>M.t+ph*(1-(v-y0)/(y1-y0));
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,role:'img','aria-label':o.alt||''});
+  (o.bandes||[]).forEach(b=>svg.appendChild(el('rect',{x:X(b[0]),y:M.t,width:X(b[1])-X(b[0]),height:ph,fill:css('--bande')})));
+  const ent=x=>Math.abs(x-Math.round(x))<1e-9,dt=ent(pas)?0:ent(pas*10)?1:2;
+  for(let k=0;k<=nt;k++){const v=y0+pas*k;svg.appendChild(el('line',{x1:M.l,x2:W-M.r,y1:Y(v),y2:Y(v),stroke:css('--grille')}));
+    txt(svg,M.l-8,Y(v)+4,fr(v,dt),{'text-anchor':'end','font-family':css('--mono'),'font-size':o.fs||12});}
+  labels.forEach((l,i)=>{if(l!=null&&l!=='')txt(svg,X(i),H-8,l,{'text-anchor':'middle','font-size':o.fs||12});});
+  svg.appendChild(el('line',{x1:M.l,x2:W-M.r,y1:M.t+ph,y2:M.t+ph,stroke:css('--trait-fort')}));
+  (o.hlines||[]).forEach(h=>{const a={x1:M.l,x2:W-M.r,y1:Y(h.v),y2:Y(h.v),stroke:css(h.c),'stroke-width':1.5};if(h.tir)a['stroke-dasharray']='5 4';svg.appendChild(el('line',a));});
+  const cur=el('line',{y1:M.t,y2:M.t+ph,stroke:css('--trait-fort'),opacity:0});svg.appendChild(cur);
+  series.forEach(s=>{let d='',up=false;s.v.forEach((v,i)=>{if(v==null){up=false;return;}d+=(up?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1);up=true;});
+    const a={d,fill:'none',stroke:css(s.c),'stroke-width':s.w||2,'stroke-linejoin':'round',opacity:s.op||1};if(s.tir)a['stroke-dasharray']='5 4';svg.appendChild(el('path',a));
+    if(o.points)s.v.forEach((v,i)=>{if(v!=null)svg.appendChild(el('circle',{cx:X(i),cy:Y(v),r:s.w>2?4:3,fill:css(s.c)}));});});
+  svg.appendChild(el('rect',{x:M.l,y:M.t,width:pw,height:ph,fill:'transparent'}));
+  hote.appendChild(svg);const tip=bulle(hote);
+  svg.addEventListener('pointermove',ev=>{const r=svg.getBoundingClientRect();const i=Math.round(((ev.clientX-r.left)/r.width*W-M.l)/pw*(n-1));if(i<0||i>=n)return;
+    cur.setAttribute('x1',X(i));cur.setAttribute('x2',X(i));cur.setAttribute('opacity',1);
+    tip.montre(X(i)/W*r.width,30,`<b>${o.tt?o.tt(i):labels[i]}</b>`+series.map(s=>`<div class="l"><span><i style="background:${css(s.c)}"></i>${s.n}</span><span>${s.v[i]==null?'–':o.ft(s.v[i])}</span></div>`).join(''));});
+  svg.addEventListener('pointerleave',()=>{tip.cache();cur.setAttribute('opacity',0);});
+}
+
+/* ---- tableau 2x2 ---- */
+(function(){
+  const rows=[['Grille actuelle','Premier créneau libre',A,''],['Grille actuelle','CoutTotal ×1',AC,''],
+    ['Nouvelle grille (AG)','Premier créneau libre',GP,''],['Nouvelle grille (AG)','CoutTotal ×1 (retenu)',G,'choisie']];
+  let h='<thead><tr><th class="g">Grille</th><th class="g">Règle d\'insertion</th><th>Heures offertes / sem.</th><th>Sans date</th><th>Délai médian</th><th>Délai P90</th><th>Écart-type lits (semaine)</th><th>Variance lits (toutes nuits)</th><th>Écart-type places / jour</th></tr></thead><tbody>';
+  rows.forEach(([g,r,v,c])=>{const p=v.planning;h+=`<tr class="${c}"><td class="g">${g}</td><td class="g">${r}</td><td>${fr(p.heures_offertes)} h</td><td>${p.sans_date}</td>
+    <td>${fr(p.delai_median)} j</td><td>${fr(p.delai_p90)} j</td><td>${fr(v.lits.stats_ouvres.ecart_type,2)}</td><td>${fr(v.lits.stats.variance,2)}</td><td>${fr(v.places.stats.ecart_type,2)}</td></tr>`;});
+  h+=`<tr><td class="g" style="color:var(--encre-3)">Hôpital réel 2022</td><td class="g" style="color:var(--encre-3)">–</td><td>–</td><td>–</td><td>–</td><td>–</td><td>${fr(R.lits.stats_ouvres.ecart_type,2)}</td><td>${fr(R.lits.stats.variance,2)}</td><td>${fr(R.places.stats.ecart_type,2)}</td></tr>`;
+  $('tb-2x2').innerHTML=h+'</tbody>';
+})();
+
+/* ---- jours de semaine ---- */
+const JS=['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+const QUAT=['reel','actuelle','ag','sans_lits'];
+leg('lg-jds',QUAT.map(k=>[SER[k][1],SER[k][0]]));
+barres('g-jds',QUAT.map(k=>({n:SER[k][0],c:SER[k][1],v:JS.map((_,i)=>P[k].lits.jds[String(i)])})),JS,{max:16,ft:v=>fr(v,1)+' lits',tt:l=>'nuit du '+l,alt:'Lits par nuit de la semaine'});
+
+/* ---- histogramme des lits ---- */
+leg('lg-hist',['reel','actuelle','ag'].map(k=>[SER[k][1],SER[k][0]]));
+const bins=[...Array(25).keys()];
+barres('g-hist',['reel','actuelle','ag'].map(k=>({n:SER[k][0],c:SER[k][1],v:bins.map(b=>P[k].lits.hist[b]||0)})),bins.map(String),
+  {max:40,larg:9,ft:v=>fr(v)+' nuits',tt:l=>l+' lits occupés',alt:'Distribution des lits occupés'});
+(function(){
+  const cols=[['moyenne','Moyenne',2],['mediane','Médiane',1],['variance','Variance',2],['ecart_type','Écart-type',2],['p10','P10',1],['p90','P90',1],['max','Maximum',0]];
+  const rows=[['Grille actuelle',A],['Planning AG',G,'choisie'],['AG sans terme des lits',S],['Hôpital réel 2022',R]];
+  $('tb-lits').innerHTML='<thead><tr><th class="g">Mai–déc., toutes les nuits</th>'+cols.map(c=>`<th>${c[1]}</th>`).join('')+'<th>Écart-type nuits de semaine</th></tr></thead><tbody>'+
+    rows.map(([n,s,cl])=>`<tr class="${cl||''}"><td class="g">${n}</td>`+cols.map(([k,,d])=>`<td>${fr(s.lits.stats[k],d)}</td>`).join('')+`<td>${fr(s.lits.stats_ouvres.ecart_type,2)}</td></tr>`).join('')+'</tbody>';
+})();
+
+/* ---- places ---- */
+leg('lg-pl',['reel','actuelle','ag'].map(k=>[SER[k][1],SER[k][0]]));
+const bp=[...Array(18).keys()];
+barres('g-pl',['reel','actuelle','ag'].map(k=>({n:SER[k][0],c:SER[k][1],v:bp.map(b=>P[k].places.hist[b]||0)})),bp.map(String),
+  {max:40,larg:12,ft:v=>fr(v)+' jours',tt:l=>l+' admissions ambulatoires',alt:'Distribution des admissions ambulatoires'});
+(function(){
+  const cols=[['moyenne','Moyenne',2],['mediane','Médiane',1],['ecart_type','Écart-type',2],['p10','P10',1],['p90','P90',1],['max','Maximum',0]];
+  const rows=[['Grille actuelle',A],['Planning AG',G,'choisie'],['AG sans terme des lits',S],['Hôpital réel 2022',R]];
+  const J5=['lun','mar','mer','jeu','ven'];
+  $('tb-pl').innerHTML='<thead><tr><th class="g">Mai–déc., jours ouvrés</th>'+cols.map(c=>`<th>${c[1]}</th>`).join('')+J5.map(j=>`<th>${j}</th>`).join('')+'</tr></thead><tbody>'+
+    rows.map(([n,s,cl])=>`<tr class="${cl||''}"><td class="g">${n}</td>`+cols.map(([k,,d])=>`<td>${fr(s.places.stats[k],d)}</td>`).join('')+J5.map((_,i)=>`<td class="moyen">${fr(s.places.jds[String(i)],1)}</td>`).join('')+'</tr>').join('')+'</tbody>';
+})();
+
+/* ---- année ---- */
+(function(){
+  const n=D.meta.nb_sem,lab=[...Array(n)].map((_,i)=>({0:'janv.',9:'mars',17:'mai',26:'juil.',35:'sept.',43:'nov.'}[i]||''));
+  const series=[{n:'Hôpital réel 2022',v:R.lits.sem,c:'--s-reel',tir:true,w:1.5},{n:'Grille actuelle',v:A.lits.sem,c:'--s-act'},{n:'Planning AG',v:G.lits.sem,c:'--s-new'}];
+  $('lg-sem').innerHTML=`<span><i class="tirets"></i>Hôpital réel 2022</span><span><i class="ligne" style="background:${css('--s-act')}"></i>Grille actuelle</span><span><i class="ligne" style="background:${css('--s-new')}"></i>Planning AG</span>`;
+  courbes($('g-sem'),series,lab,{min:0,max:20,bandes:[[0,D.meta.sem_test[0]]],ft:v=>fr(v,1)+' lits',tt:i=>'semaine '+(i+1),alt:'Lits par semaine'});
+})();
+
+/* ---- remplissage ---- */
+(function(){
+  const cols=[['Grille actuelle, premier créneau',A,''],['Nouvelle grille, premier créneau',GP,''],['Planning AG (CoutTotal)',G,'choisie']];
+  const L=[['Patients opérés par semaine, moyenne',p=>fr(p.patients_semaine.moyenne,1)],['— écart-type',p=>fr(p.patients_semaine.ecart_type,1)],
+    ['— semaine la plus faible / la plus forte',p=>fr(p.patients_semaine.min)+' / '+fr(p.patients_semaine.max)],
+    ['— dont ambulatoires / hospitalisés',p=>fr(p.ambu_semaine,1)+' / '+fr(p.hosp_semaine,1)],
+    ['Heures offertes par semaine',p=>fr(p.heures_offertes)+' h'],['Heures engagées par semaine (durée + marge + TIS)',p=>fr(p.heures_engagees)+' h'],
+    ['Remplissage (engagé / offert)',p=>fr(100*p.remplissage_semaine.moyenne,1)+' %'],
+    ['— semaine la plus faible / la plus forte',p=>fr(100*p.remplissage_semaine.min)+' % / '+fr(100*p.remplissage_semaine.max)+' %'],
+    ['Vacations',p=>fr(p.vacations)],['— dont vides',p=>fr(p.vacations_vides)],
+    ['— utilisées remplies à plus de 85 %',p=>fr(100*p.sup85)+' %'],['— utilisées remplies à moins de 50 %',p=>fr(100*p.sous50,1)+' %'],
+    ['Salles-jours ouvertes par semaine',p=>fr(p.salles_jours_semaine,1)],
+    ['Patients sans date',p=>fr(p.sans_date)],['Délai médian / P90',p=>fr(p.delai_median)+' / '+fr(p.delai_p90)+' j'],
+    ['Dépassements de vacation',p=>fr(p.depassement_h,1)+' h']];
+  $('tb-rempl').innerHTML='<thead><tr><th class="g">Semaines complètes de mai à décembre</th>'+cols.map(([n])=>`<th>${n}</th>`).join('')+'</tr></thead><tbody>'+
+    L.map(([l,f])=>`<tr><td class="g">${l}</td>`+cols.map(([,v])=>`<td>${f(v.planning)}</td>`).join('')+'</tr>').join('')+'</tbody>';
+})();
+
+/* ---- découpage ---- */
+(function(){
+  const m=D.meta,q=D.BES.reduce((s,b)=>s+b.quota,0),hAct=D.BES.reduce((s,b)=>s+b.h_act,0)*4;
+  $('decoupage').innerHTML=`Salles 1 à 5 (la salle 1, fermée dans la grille actuelle, peut être ouverte), du lundi au vendredi,
+  matin (8h–13h, 5 h) et après-midi (13h30–17h30, 4 h). Un même médecin le matin et l'après-midi dans la même salle donne
+  une journée 8h–17h30. Le cycle dure 4 semaines, répété toute l'année ; les jours fériés sont fermés. Les créneaux URGENCES
+  de la grille actuelle sont conservés et retirent les demi-journées qu'ils chevauchent : il reste
+  <strong>${m.cases_libres} demi-journées sur ${m.cases_total}</strong> par cycle. Les quotas en occupent <strong>${q}</strong>,
+  soit <strong>${fr(m.heures_cycle_new)} h par cycle</strong>, contre ${fr(hAct)} h pour la grille actuelle. Ce n'est
+  <strong>pas</strong> une comparaison à moyens égaux (voir limites).`;
+})();
+
+/* ---- besoin ---- */
+(function(){
+  const B=[...D.BES].sort((a,b)=>b.h_app-a.h_app);
+  let h='<thead><tr><th class="g">Médecin</th><th>Patients janv.–avr.</th><th>Besoin janv.–avr.</th><th>Besoin réel mai–déc.</th><th>Quota (demi-journées / 4 sem.)</th><th>Offert, nouvelle grille</th><th>Offert, grille actuelle</th></tr></thead><tbody>';
+  B.forEach(b=>{const err=Math.abs(b.h_app-b.h_test)/Math.max(b.h_test,1);
+    h+=`<tr><td class="g">${b.m}</td><td>${b.patients_app}</td><td class="${err>0.3?'mauvais':''}">${fr(b.h_app,1)}</td><td>${fr(b.h_test,1)}</td><td>${b.quota}</td><td>${fr(b.h_new,1)}</td><td>${fr(b.h_act,1)}</td></tr>`;});
+  $('tb-besoin').innerHTML=h+'</tbody>';
+})();
+
+/* ---- étapes AG + convergence ---- */
+(function(){
+  const ref=D.VAR[0],c=ref.convergence;
+  $('etapes').innerHTML=[
+    ['1','Codage','Tableau semaine × jour × salle × demi-journée ; chaque case contient un médecin, « vide » ou « urgences ». Quotas fixés à l\'avance.','4 × 5 × 5 × 2 = 200 cases'],
+    ['2','Population et sélection','40 grilles aléatoires qui respectent les quotas ; 60 % des demi-journées posées en journées entières. Tournoi à 3, 2 élites conservées.',`coût initial ${fr(c[0][1],2)}`],
+    ['3','Croisement et mutations','Croisement par jours entiers (chaque jour vient d\'un parent), puis réparation des quotas. Mutations : échange de cases, regroupement matin / après-midi, échange de deux jours.','300 générations'],
+    ['4','Descente finale','1 500 mutations essayées sur la meilleure grille ; on garde celles qui baissent le coût.',`coût final ${fr(c[c.length-1][1],3)}`],
+  ].map(([n,t,d,r])=>`<div class="etape"><span class="n">étape ${n}</span><span class="t">${t}</span><span class="d">${d}</span><span class="r">${r}</span></div>`).join('');
+  courbes($('g-conv'),[{n:'Meilleure grille',v:c.map(x=>x[1]),c:'--s-new'}],c.map(x=>x[0]%50===0?String(x[0]):''),
+    {h:220,dy:2,ft:v=>fr(v,3),tt:i=>'génération '+c[i][0],alt:'Convergence de l\'AG de grille'});
+})();
+
+/* ---- sensibilité ---- */
+(function(){
+  const V=D.VAR,ref=V[0],mults=[0,.25,1,4,16],lab=['×0','×¼','×1','×4','×16'];
+  const COEF=[['lits','Poids lits','--s-new'],['places','Poids places','--s-pl'],['remplissage','Poids remplissage','--s-ctl'],['delai','Poids délai','--mauvais']];
+  const val=(c,m,f)=>{const v=m===1?ref:V.find(x=>x.coef===c&&x.mult===m);return v?f(v):null;};
+  const IND=[['Écart-type des lits, nuits de semaine',v=>v.lits_ouvres.ecart_type,2,{v:R.lits.stats_ouvres.ecart_type,a:A.lits.stats_ouvres.ecart_type}],
+    ['Écart-type des admissions ambulatoires / jour',v=>v.places.ecart_type,2,{v:R.places.stats.ecart_type,a:A.places.stats.ecart_type}],
+    ['Délai médian consultation → opération (jours)',v=>v.delai_median,0,{a:A.planning.delai_median}],
+    ['Remplissage, temps engagé / offert (%)',v=>100*v.remplissage,1,{a:100*A.planning.remplissage_semaine.moyenne}]];
+  const hote=$('g-sens');
+  IND.forEach(([t,f,d,ref2])=>{const fig=document.createElement('figure');fig.innerHTML=`<h3>${t}</h3>`;hote.appendChild(fig);
+    const hl=[];if(ref2.v!=null)hl.push({v:ref2.v,c:'--s-reel',tir:true});if(ref2.a!=null)hl.push({v:ref2.a,c:'--s-act',tir:true});
+    const series=COEF.map(([c,n,col])=>({n,c:col,v:mults.map(m=>val(c,m,f))}));
+    const all=series.flatMap(s=>s.v).concat(hl.map(h=>h.v));
+    courbes(fig,series,lab,{W:460,h:210,fs:13,points:true,dy:d,hlines:hl,min:0,max:Math.max(...all),ft:v=>fr(v,d),tt:i=>'multiplicateur '+lab[i]});});
+  const note=document.createElement('p');note.className='note';note.style.gridColumn='1/-1';
+  note.innerHTML=COEF.map(([,n,c])=>`<span style="display:inline-flex;align-items:center;gap:6px;margin-right:14px"><i style="width:12px;height:3px;background:${css(c)};display:inline-block"></i>${n}</span>`).join('')+
+    `<span style="display:inline-flex;align-items:center;gap:6px;margin-right:14px"><i style="width:16px;border-top:2px dashed ${css('--s-reel')};display:inline-block"></i>Hôpital réel</span><span style="display:inline-flex;align-items:center;gap:6px"><i style="width:16px;border-top:2px dashed ${css('--s-act')};display:inline-block"></i>Grille actuelle</span>`;
+  hote.appendChild(note);
+  const NOMS={reference:'Référence',lits:'Poids des lits',places:'Poids des places',remplissage:'Poids du remplissage',delai:'Poids du délai'};
+  let h='<thead><tr><th class="g">Configuration</th><th>Écart-type lits (semaine)</th><th>Variance lits (toutes nuits)</th><th>Pic lits</th><th>Écart-type places</th><th>Pic places</th><th>Remplissage</th><th>Sans date</th><th>Délai méd.</th><th>P90</th><th>Salles-jours / sem.</th><th>Pic places simultanées</th></tr></thead><tbody>';
+  const ligne=(v,nom,cl)=>`<tr class="${cl||''}"><td class="g">${nom}</td><td class="${v.lits_ouvres.ecart_type<ref.lits_ouvres.ecart_type*0.85?'bon':''}">${fr(v.lits_ouvres.ecart_type,2)}</td><td>${fr(v.lits.variance,2)}</td><td>${fr(v.lits.max)}</td>
+    <td class="${v.places.ecart_type<ref.places.ecart_type*0.85?'bon':''}">${fr(v.places.ecart_type,2)}</td><td>${fr(v.places.max)}</td><td>${fr(100*v.remplissage,1)} %</td><td>${v.sans_date}</td>
+    <td class="${v.delai_median>ref.delai_median+5?'mauvais':v.delai_median<ref.delai_median-5?'bon':''}">${fr(v.delai_median)} j</td><td>${fr(v.delai_p90)} j</td><td>${fr(v.salles_jours,1)}</td><td>${fr(v.pic_simultane,2)}</td></tr>`;
+  h+=`<tr class="groupe"><td class="g" colspan="12">${NOMS.reference}</td></tr>`+ligne(ref,'Tous les poids ×1','choisie');
+  ['lits','places','remplissage','delai'].forEach(c=>{h+=`<tr class="groupe"><td class="g" colspan="12">${NOMS[c]}</td></tr>`;
+    [0,.25,4,16].forEach(m=>{const v=V.find(x=>x.coef===c&&x.mult===m);if(v)h+=ligne(v,v.nom);});});
+  $('tb-var').innerHTML=h+'</tbody>';
+})();
+
+/* ---- journalier ---- */
+(function(){
+  const J=D.JOUR.lignes,cols=[['Pic de places occupées en même temps (moyenne par jour)','Pic de places simultanées',2],
+    ['Écart-type des places dans la journée','Écart-type des places dans la journée',2],['Temps perdu en fin de vacation (min par jour)','Temps perdu (min / jour)',0],
+    ['Dépassement prévu (min, total)','Dépassement prévu (min)',0],['Dépassement avec durées réelles (min par jour)','Dépassement réel (min / jour)',2],
+    ['Vacations qui débordent avec durées réelles (total)','Vacations qui débordent (réel)',0],['Journées infaisables','Journées infaisables',0]];
+  $('tb-jour').innerHTML='<thead><tr><th class="g">AG journalier</th>'+cols.map(c=>`<th>${c[1]}</th>`).join('')+'</tr></thead><tbody>'+
+    J.map(r=>`<tr class="${r.nom.startsWith('Référence')?'choisie':''}"><td class="g">${r.nom}</td>`+cols.map(([k,,d])=>`<td>${fr(r[k],d)}</td>`).join('')+'</tr>').join('')+'</tbody>';
+})();
+
+/* ---- grille ---- */
+(function(){
+  const g=D.G,J=['Lundi','Mardi','Mercredi','Jeudi','Vendredi'],DEMI=['matin','ap.-midi'];
+  const nom=x=>x===-2?null:x===-1?'':g.codes[x];
+  const bk=(x,d)=>x===-2?`<div class="bk reserve"><span class="qui">URGENCES</span><span class="h">${DEMI[d]}</span></div>`
+    :x===-1?`<div class="bk ferme"><span class="qui">fermé</span><span class="h">${DEMI[d]}</span></div>`
+    :`<div class="bk"><span class="qui">${g.codes[x]}</span><span class="h">${DEMI[d]}</span></div>`;
+  let h='<thead><tr><th></th><th></th>'+[...Array(g.C).keys()].map(s=>`<th>semaine ${s+1}</th>`).join('')+'</tr></thead><tbody>';
+  for(let j=0;j<5;j++){g.salles.forEach((s,r)=>{h+=`<tr class="${r===0?'debut-jour':''}">`+(r===0?`<th class="jour" rowspan="${g.salles.length}">${J[j]}</th>`:'')+`<th>salle ${s}</th>`;
+    for(let w=0;w<g.C;w++){const [m,a]=g.X[w][j][r];
+      const cell=(m>=0&&m===a)?`<div class="bk"><span class="qui">${g.codes[m]}</span><span class="h">journée</span></div>`:bk(m,0)+bk(a,1);
+      h+=`<td><div class="cellule">${cell}</div></td>`;}
+    h+='</tr>';});}
+  $('grille').innerHTML=h+'</tbody>';
+  const JJ=['lun','mar','mer','jeu','ven'];
+  $('tb-jours').innerHTML='<thead><tr><th class="g">Médecin</th><th>Heures offertes par semaine</th><th class="g">Jours actuels</th><th class="g">Jours dans la nouvelle grille</th></tr></thead><tbody>'+
+    [...D.BES].sort((a,b)=>a.m<b.m?-1:1).map(b=>`<tr><td class="g">${b.m}</td><td>${fr(b.h_act,1)} → ${fr(b.h_new,1)}</td><td class="g">${b.j_act.map(i=>JJ[i]).join(', ')}</td><td class="g">${b.j_new.map(i=>JJ[i]).join(', ')}</td></tr>`).join('')+'</tbody>';
+})();
+})();
+</script>
+</body></html>
