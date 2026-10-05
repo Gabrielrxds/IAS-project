@@ -1,0 +1,19 @@
+﻿contrôle;valeur;commentaire
+lignes;14649;
+séjours en double (id_sejour);0;doit être 0
+patients distincts;11108;
+patients avec plusieurs séjours;2546;
+période;02/01/2019 → 30/12/2022;
+entrée après l'intervention;0;doit être 0
+intervention après la sortie;0;doit être 0
+durée déclarée ≠ dates;2560;17.5% des séjours : on utilise les dates
+  dont déclarés ambulatoires mais avec nuits;1884;
+plus de 3 nuits avant l'opération;23;à vérifier
+plus de 30 nuits;1;
+heures de salle inconnues (00:00);172;durées laissées vides
+durée de salle aberrante (<0 ou >12 h);0;durées laissées vides
+chirurgien manquant;98;codé INCONNU
+type d'intervention manquant;137;
+types d'intervention distincts (normalisés);1427;les 30 premiers couvrent 85% des interventions
+anesthésie générale non renseignée;2241;souvent : bloc seul
+colonne « Année » ≠ année de l'intervention;2;on garde l'année de l'intervention

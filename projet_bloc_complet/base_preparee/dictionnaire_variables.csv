@@ -1,0 +1,92 @@
+﻿variable;connue_a;description;type;valeurs_manquantes;modalites
+id_sejour;identifiant;identifiant du séjour (No Cas);int64;0;14649
+id_patient;identifiant;identifiant anonyme du patient;int64;0;11108
+date_entree;après la sortie;date d'entrée (connue une fois le séjour planifié);datetime64[us];0;1196
+date_inter;date choisie;date de l'intervention;datetime64[us];0;1069
+date_sortie;après la sortie;date de sortie;datetime64[us];0;1411
+annee;date choisie;année de l'intervention;int32;0;4
+sexe;consultation;H / F;category;0;2
+age;consultation;âge le jour de l'intervention (années);float64;0;884
+classe_age;consultation;tranche d'âge;category;0;5
+nuits_avant_op;après la sortie;nuits entre l'entrée et l'intervention (1 = entrée la veille);int64;0;10
+nuits_apres_op;après la sortie;nuits entre l'intervention et la sortie;int64;0;13
+nuits_total;après la sortie;NUITS D'HOSPITALISATION = date de sortie - date d'entrée (cible principale);int64;0;17
+duree_sejour_jours;après la sortie;nuits_total + 1 (convention du fichier : 1 = ambulatoire);int64;0;17
+ambulatoire;après la sortie;vrai si aucune nuit (cible de classification);bool;0;2
+entree_veille;après la sortie;vrai si entrée la veille ou avant;bool;0;2
+classe_sejour;après la sortie;ambulatoire / 1-2 / 3-5 / 6-10 / plus de 10 nuits;category;0;5
+duree_sejour_declaree;après la sortie;colonne du fichier, NON FIABLE, gardée pour contrôle;int64;0;46
+ecart_declare_vs_dates;après la sortie;durée déclarée - durée calculée par les dates;int64;0;42
+duree_declaree_incoherente;après la sortie;vrai si la colonne du fichier contredit les dates;bool;0;2
+chirurgien;consultation;code du chirurgien (CL, JT…);category;0;24
+chirurgien_nom;consultation;nom anonymisé du chirurgien;str;0;26
+type_intervention;consultation;libellé d'origine;string;137;1433
+type_intervention_norm;consultation;libellé normalisé (minuscules, sans accents);str;137;1427
+type_intervention_groupe;consultation;30 types les plus fréquents, les autres = « autre »;category;0;31
+diag_principal;consultation;diagnostic principal CIM-10;string;0;617
+diag_chapitre;consultation;1re lettre CIM-10 (M ostéo-articulaire, S traumatisme, I circulatoire…);category;0;17
+diag_categorie;consultation;3 premiers caractères CIM-10 (M17 gonarthrose…);string;0;161
+nb_diag_associes;consultation;"nombre de diagnostics associés (comorbidités ; codés à la sortie mais en général connus avant)";int64;0;6
+comorbidite_hypertension;consultation;diagnostic associé I10-I15;boolean;0;2
+comorbidite_diabete;consultation;diagnostic associé E10-E14;boolean;0;2
+comorbidite_obesite;consultation;diagnostic associé E66;boolean;0;2
+comorbidite_tabac;consultation;diagnostic associé F17 / Z72.0;boolean;0;2
+comorbidite_anticoagulant;consultation;diagnostic associé Z92.1 / Z79.0;boolean;0;2
+ccam_principal;consultation;1er acte CCAM DE LA LISTE (une radiographie dans ~25 % des cas : préférer acte_chirurgical);string;69;570
+ccam_appareil;consultation;1re lettre du 1er acte de la liste;category;69;12
+ccam_groupe;consultation;2 premières lettres du 1er acte de la liste;string;69;50
+nb_actes_ccam;consultation;nombre d'actes CCAM (0 à 4);int64;0;5
+acte_chirurgical;consultation;ACTE CHIRURGICAL : 1er acte qui n'est ni un examen (3e lettre Q), ni une transfusion (F), ni un supplément (Y), ni Z;string;69;622
+acte_chirurgical_famille;consultation;4 premiers caractères de l'acte : topographie + action + voie;string;69;246
+acte_topographie;consultation;2 premières lettres de l'acte (NF genou, NE hanche, MJ épaule, EJ veines…);string;69;49
+acte_appareil;consultation;grand appareil de l'acte (membre inférieur, supérieur, rachis, vaisseaux…);category;69;12
+acte_sous_arthroscopie;consultation;4e lettre C : acte par voie endoscopique (arthroscopie);bool;0;2
+nb_actes_chirurgicaux;consultation;nombre d'actes chirurgicaux;Int64;0;5
+nb_actes_diagnostiques;consultation;nombre d'examens associés (radiographies…);Int64;0;5
+premier_acte_est_diagnostique;consultation;vrai si le 1er acte de la liste est un examen;bool;0;2
+anesthesie_type;anesthésie;type d'anesthésie générale (décidé en consultation d'anesthésie);category;2241;9
+anesthesie_locoreg;anesthésie;bloc loco-régional;category;5428;26
+anesthesie_generale;anesthésie;vrai si AG;boolean;0;2
+bloc_locoregional;anesthésie;vrai si bloc loco-régional;bool;0;2
+ghm;après la sortie;groupe homogène de malades (calculé APRÈS la sortie : FUITE si utilisé pour prédire);string;0;205
+ghm_cmd;après la sortie;catégorie majeure du GHM;string;0;12
+ghm_type;après la sortie;C chirurgical / K / M;category;39;3
+ghm_niveau;après la sortie;1-4 sévérité, J ambulatoire, T très courte durée : FUITE directe;category;0;8
+ghs;après la sortie;groupe homogène de séjour (tarif);int64;0;212
+heure_sspi_pre_min;après l'opération;heure d'entrée en SSPI pré-op (minutes depuis minuit);float64;133;652
+heure_entree_salle_min;après l'opération;heure d'entrée en salle (minutes);float64;172;650
+heure_incision_min;après l'opération;heure d'incision (minutes);float64;552;654
+heure_sortie_salle_min;après l'opération;heure de sortie de salle (minutes);float64;172;691
+duree_salle_min;après l'opération;TROS : sortie - entrée en salle (cible pour prévoir le bloc);float64;172;249
+duree_avant_incision_min;après l'opération;installation + anesthésie (entrée salle -> incision);float64;665;78
+duree_chirurgie_min;après l'opération;incision -> sortie de salle;float64;627;217
+attente_sspi_pre_min;après l'opération;attente en SAS de pré-anesthésie;float64;516;155
+passage_sspi_pre;après l'opération;vrai s'il y a eu un passage en SSPI pré-op;bool;0;2
+creneau_horaire;après l'opération;matin / fin de matinée / après-midi;category;172;3
+jour_semaine;date choisie;0 = lundi … 6 = dimanche;int32;0;7
+jour_semaine_nom;date choisie;jour de l'intervention;category;0;7
+mois;date choisie;mois de l'intervention;int32;0;12
+semaine_iso;date choisie;numéro de semaine ISO;int64;0;53
+semaine_paire;date choisie;semaine paire (grille de vacations);bool;0;2
+trimestre;date choisie;trimestre;int32;0;4
+ferie;date choisie;intervention un jour férié;bool;0;2
+pont;date choisie;intervention un jour de pont;bool;0;2
+vacances_scolaires;date choisie;intervention pendant les vacances scolaires (zone B);bool;0;2
+periode_covid;date choisie;intervention pendant un confinement;bool;0;2
+nuits_weekend;après la sortie;nuits du vendredi, samedi ou dimanche pendant le séjour;int64;0;9
+sejour_couvre_weekend;après la sortie;vrai si au moins une nuit de week-end;bool;0;2
+classe_urgence;consultation;U1 urgence (<24-48 h), U2 urgence différée (<72 h), P2 (<1 mois), P3 (<3 mois), P4 (>3 mois) — urgences.py;category;0;5
+classe_urgence_libelle;consultation;libellé de la classe d'urgence;str;0;5
+motif_urgence;consultation;situation clinique ayant déterminé la classe;str;0;113
+reference_urgence;consultation;source (FSSA, SFAR/SOFCOT…);str;0;70
+regle_urgence;consultation;préfixe CIM-10 de la règle appliquée;str;0;111
+delai_max_jours;consultation;délai maximal recommandé avant l'opération (jours);int64;0;5
+urgence;consultation;vrai si classe U1 ou U2;bool;0;2
+score_priorite;consultation;ordre de passage : classe d'urgence puis âge et comorbidités (plus haut = plus tôt);int64;0;71
+rang_sejour_patient;consultation;1 = premier séjour du patient dans la base;int64;0;9
+nb_sejours_anterieurs;consultation;séjours précédents du patient;int64;0;9
+jours_depuis_sejour_precedent;consultation;jours depuis sa dernière sortie (vide si premier séjour);float64;11108;770
+nb_sejours_patient_total;après la sortie;nombre total de séjours du patient (utilise le futur : FUITE);int64;0;9
+heures_incompletes;après l'opération;heure d'entrée ou de sortie de salle inconnue (00:00);bool;0;2
+nuits_avant_op_atypiques;après la sortie;plus de 3 nuits avant l'opération;bool;0;2
+sejour_long_atypique;après la sortie;plus de 30 nuits;bool;0;2
