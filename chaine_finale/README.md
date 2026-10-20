@@ -14,7 +14,7 @@ Les chemins (données, études d'origine) sont dans `commun/chemins.py`.
 | `hybride/` | `hybride_grille.py` (problème de grille), `chaine_hybride.py` (construction de la grille), `regle_hybride.py` (règle de date et patients fantômes), `lancer_hybride.py`, `tester_hybride.py` |
 | `hybride_sma/` | `sma_aleas.py` (agents), `sma_pont.py` (branchement sur le plan du matin), `sma_matin.py` (plans du matin), `sma_v2.py`, `sma_v3.py` (versions du jour J), lancement et tests |
 | `aleas/` | `gestion_aleas.py` (formulaire, catégories, réponses), `absences.py` (reprogrammation), `scenarios_aleas.py`, `experiences_aleas.py`, `experiences_absences.py`, `experiences_non_venues.py`, tests |
-| `experiences/` | un script par résultat du rapport ; voir `../CORRESPONDANCE_RAPPORT.md` |
+| `experiences/` | un script par résultat du rapport |
 | `figures/` | `figures_rapport.py` : toutes les figures, lues dans `resultats/` |
 | `grilles/` | `hybride.json` (retenue), `hybride_c*.json` (étude de la cible), `hybride_cycle4.json`, `hybride_variance.json`, grilles des études (`tabou`, `genetique`, `genetique_iso`, `recuit`), `statique_*.json` (trois algorithmes sur le même problème) |
 | `resultats/` | résultats agrégés en JSON |

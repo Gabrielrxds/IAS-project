@@ -40,8 +40,7 @@ IAS-project/
 └── rapport/                rapport final (PDF)
 ```
 
-Correspondance entre chaque figure ou tableau du rapport et le script qui le produit :
-[`CORRESPONDANCE_RAPPORT.md`](CORRESPONDANCE_RAPPORT.md). Fonctions à appeler depuis une interface :
+Fonctions à appeler depuis une interface :
 [`docs/CONTRATS_INTERFACE.md`](docs/CONTRATS_INTERFACE.md).
 
 ## Installer
