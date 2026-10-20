@@ -1,0 +1,54 @@
+{
+ "hybride_cycle4|plafond=False": {
+  "lits_crit1": 5.381224489795919,
+  "lits_crit1_max": 16.0,
+  "lits_semaine_variance": 2.8101615128642154,
+  "lits_semaine_max": 16.0,
+  "lits_ratio_weekend": 0.7062342387394002,
+  "lits_ratio_vacances": 0.6856341249608864,
+  "lits_variance": 7.432192142162987,
+  "sans_date": 0.0,
+  "delai_median": 23.333333333333332,
+  "delai_p90": 52.066666666666755,
+  "patients_par_semaine": 58.714285714285715
+ },
+ "hybride_cycle4|plafond=True": {
+  "lits_crit1": 5.253942857142856,
+  "lits_crit1_max": 17.0,
+  "lits_semaine_variance": 2.7526445364283205,
+  "lits_semaine_max": 17.0,
+  "lits_ratio_weekend": 0.7194768633230336,
+  "lits_ratio_vacances": 0.671483154555847,
+  "lits_variance": 7.233386089129531,
+  "sans_date": 0.0,
+  "delai_median": 24.0,
+  "delai_p90": 51.86666666666671,
+  "patients_par_semaine": 58.714285714285715
+ },
+ "hybride|plafond=False": {
+  "lits_crit1": 4.8700081632653065,
+  "lits_crit1_max": 16.666666666666668,
+  "lits_semaine_variance": 2.5995725455184915,
+  "lits_semaine_max": 16.666666666666668,
+  "lits_ratio_weekend": 0.7067459802532272,
+  "lits_ratio_vacances": 0.7127310716717797,
+  "lits_variance": 7.051628488129946,
+  "sans_date": 0.0,
+  "delai_median": 24.0,
+  "delai_p90": 62.73333333333343,
+  "patients_par_semaine": 58.714285714285715
+ },
+ "hybride|plafond=True": {
+  "lits_crit1": 4.927912925170067,
+  "lits_crit1_max": 16.333333333333332,
+  "lits_semaine_variance": 2.5275004734464193,
+  "lits_semaine_max": 16.333333333333332,
+  "lits_ratio_weekend": 0.7240511252763066,
+  "lits_ratio_vacances": 0.6751541941302097,
+  "lits_variance": 7.145544911842289,
+  "sans_date": 0.0,
+  "delai_median": 24.333333333333332,
+  "delai_p90": 63.200000000000045,
+  "patients_par_semaine": 58.714285714285715
+ }
+}

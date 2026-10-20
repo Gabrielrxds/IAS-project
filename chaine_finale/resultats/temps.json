@@ -1,0 +1,79 @@
+{
+ "machine": {
+  "cpu": "x86_64",
+  "coeurs": 2,
+  "python": "3.11.15",
+  "numpy": "2.4.4",
+  "os": "Linux-6.18.44-fc-v139-x86_64-with-glibc2.39"
+ },
+ "consultation \u00b7 premier cr\u00e9neau": {
+  "total_s": 1.4643218606667385,
+  "ms_par_patient": 0.402396774022187,
+  "patients": 3639
+ },
+ "consultation \u00b7 r\u00e8gle tabou": {
+  "total_s": 2.446903500666546,
+  "ms_par_patient": 0.6724109647338681,
+  "patients": 3639
+ },
+ "consultation \u00b7 r\u00e8gle g\u00e9n\u00e9tique": {
+  "total_s": 4.481177370333171,
+  "ms_par_patient": 1.2314309893743256,
+  "patients": 3639
+ },
+ "consultation \u00b7 r\u00e8gle hybride (fant\u00f4mes)": {
+  "total_s": 1.844936634000078,
+  "ms_par_patient": 0.5069900065952399,
+  "patients": 3639
+ },
+ "consultation \u00b7 r\u00e8gle hybride (sans fant\u00f4mes)": {
+  "total_s": 1.437280954666979,
+  "ms_par_patient": 0.3949659122470401,
+  "patients": 3639
+ },
+ "journ\u00e9e \u00b7 g\u00e9n\u00e9tique (1000 \u00e9valuations)": {
+  "moyenne_s": 0.11355624066861725,
+  "max_s": 0.34232288200018957,
+  "jours": 169
+ },
+ "journ\u00e9e \u00b7 recuit (1000 \u00e9valuations)": {
+  "moyenne_s": 0.07264845141415843,
+  "max_s": 0.20598506500027725,
+  "jours": 169
+ },
+ "journ\u00e9e \u00b7 tabou (1000 \u00e9valuations)": {
+  "moyenne_s": 0.07731943725442514,
+  "max_s": 0.36121990800074855,
+  "jours": 169
+ },
+ "grille \u00b7 tabou": {
+  "total_s": 434.5264914035797
+ },
+ "grille \u00b7 recuit": {
+  "total_s": 71.08637976646423
+ },
+ "grille \u00b7 genetique_iso": {
+  "total_s": 9.626448392868042
+ },
+ "grille \u00b7 hybride": {
+  "total_s": 109.35327053070068
+ },
+ "SMA \u00b7 reference \u00b7 statique": {
+  "ms_par_journee": 0.7859107514792069
+ },
+ "SMA \u00b7 reference \u00b7 reoptimisation": {
+  "ms_par_journee": 0.9991060198224109
+ },
+ "SMA \u00b7 reference \u00b7 sma": {
+  "ms_par_journee": 1.0971195997048113
+ },
+ "SMA \u00b7 hybride \u00b7 statique": {
+  "ms_par_journee": 0.9138398914201497
+ },
+ "SMA \u00b7 hybride \u00b7 reoptimisation": {
+  "ms_par_journee": 38.200006455030206
+ },
+ "SMA \u00b7 hybride \u00b7 sma": {
+  "ms_par_journee": 6.7023277396452805
+ }
+}

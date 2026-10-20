@@ -1,0 +1,18 @@
+# Données de l'hôpital : jamais dans le dépôt
+donnees/*
+!donnees/README.md
+*.xlsx
+*.xls
+*.csv
+*.pkl
+*.joblib
+
+# Caches et sorties régénérables
+chaine_finale/cache/
+chaine_finale/resultats/figures/
+etudes_origine/**/resultats*/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.log
+.DS_Store
